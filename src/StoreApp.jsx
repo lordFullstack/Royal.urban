@@ -1,120 +1,61 @@
-import React, { useState, useMemo, useRef } from "react";
+import React, { useState, useMemo, useRef, useEffect } from "react";
 import { Search, ShoppingBag, X, Plus, Minus, Home, Grid3x3, MessageCircle, ChevronLeft, Flame } from "lucide-react";
+import { fetchCatalog, fetchCategories, fetchActivePromotions, fetchSettings, openWhatsappCheckout, statusVisual } from "./lib/supabase";
 
 /* ---------------------------------------------------------
-   YEI-SI ROYALE URBAN — Catálogo público
-   Token system:
-   - bg base   #050505 / cards #0d0d0d
-   - gold      #cda45e  (títulos premium, precios)
-   - neon red  #ff2340  (glow, estados activos)
-   - white     #f2f2f0
-   - muted     #7a7a7a
-   Display type: Oswald (condensada, actitud) / Body: Inter
-   Signature: el "glow" rojo de streetlight — nace del logo y se
-   propaga por los bordes activos, nunca es color de fondo.
+   ROYAL URBAN — Catálogo público (conectado a Supabase)
 --------------------------------------------------------- */
-
-const WHATSAPP_NUMBER = "573000000000"; // configurable en admin
-
-const CATEGORIES = ["Nuevos", "Camisetas", "Hoodies", "Chaquetas", "Gorras", "Ofertas"];
-
-const PRODUCTS = [
-  {
-    id: "p1",
-    name: "Camiseta Royale",
-    category: "Camisetas",
-    price: 89900,
-    oldPrice: null,
-    tag: "NUEVO",
-    img: "https://images.unsplash.com/photo-1521572163474-6864f9cf17ab?w=600&q=80",
-    colors: ["Negro", "Blanco", "Gris"],
-    sizes: ["S", "M", "L", "XL"],
-    stockByVariant: { "Negro-S": 3, "Negro-M": 7, "Negro-L": 0, "Negro-XL": 5, "Blanco-S": 2, "Blanco-M": 1, "Blanco-L": 4, "Blanco-XL": 0, "Gris-S": 6, "Gris-M": 6, "Gris-L": 6, "Gris-XL": 6 },
-    minStock: 3,
-    desc: "Algodón peinado 220gsm, corte oversized, etiqueta bordada dorada. Pieza base de la colección Royale.",
-  },
-  {
-    id: "p2",
-    name: "Hoodie Blackout",
-    category: "Hoodies",
-    price: 179900,
-    oldPrice: 219900,
-    tag: "OFERTA",
-    img: "https://images.unsplash.com/photo-1556821840-3a63f95609a7?w=600&q=80",
-    colors: ["Negro", "Gris"],
-    sizes: ["M", "L", "XL", "XXL"],
-    stockByVariant: { "Negro-M": 2, "Negro-L": 4, "Negro-XL": 1, "Negro-XXL": 0, "Gris-M": 5, "Gris-L": 5, "Gris-XL": 5, "Gris-XXL": 5 },
-    minStock: 3,
-    desc: "Hoodie pesado 400gsm, capucha forrada, bolsillo canguro reforzado. Silueta streetwear premium.",
-  },
-  {
-    id: "p3",
-    name: "Chaqueta Night Rider",
-    category: "Chaquetas",
-    price: 349900,
-    oldPrice: null,
-    tag: "DESTACADO",
-    img: "https://images.unsplash.com/photo-1551028719-00167b16eac5?w=600&q=80",
-    colors: ["Negro"],
-    sizes: ["M", "L", "XL"],
-    stockByVariant: { "Negro-M": 1, "Negro-L": 2, "Negro-XL": 0 },
-    minStock: 2,
-    desc: "Chaqueta técnica con detalles reflectivos rojo neón. Edición limitada, forro térmico.",
-  },
-  {
-    id: "p4",
-    name: "Gorra Crest Gold",
-    category: "Gorras",
-    price: 69900,
-    oldPrice: null,
-    tag: null,
-    img: "https://images.unsplash.com/photo-1588850561407-ed78c282e89b?w=600&q=80",
-    colors: ["Negro", "Blanco"],
-    sizes: ["Única"],
-    stockByVariant: { "Negro-Única": 12, "Blanco-Única": 0 },
-    minStock: 4,
-    desc: "Gorra six-panel, bordado dorado en relieve, visera curva. Ajuste snapback.",
-  },
-];
-
-const PROMOS = [
-  { id: "b1", title: "COLECCIÓN NOCTURNA", desc: "Nueva caída disponible esta semana", cta: "Ver colección" },
-  { id: "b2", title: "-20% HOODIES", desc: "Solo por tiempo limitado", cta: "Ver ofertas" },
-];
 
 function money(n) {
   return "$" + n.toLocaleString("es-CO");
 }
 
-function stockStatus(qty, minStock) {
-  if (qty <= 0) return { label: "AGOTADO", cls: "text-white/40 border-white/15" };
-  if (qty <= minStock) return { label: "ÚLTIMAS UNIDADES", cls: "text-[#ff2340] border-[#ff2340]/50" };
-  return { label: "DISPONIBLE", cls: "text-[#cda45e] border-[#cda45e]/40" };
-}
-
-function totalStock(product) {
-  return Object.values(product.stockByVariant).reduce((a, b) => a + b, 0);
-}
-
 export default function StoreApp() {
-  const [view, setView] = useState("home"); // home | product | cart
+  const [view, setView] = useState("home");
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(null);
+  const [products, setProducts] = useState([]);
+  const [categories, setCategories] = useState([]);
+  const [promos, setPromos] = useState([]);
+  const [settings, setSettings] = useState(null);
+
   const [activeCategory, setActiveCategory] = useState("Nuevos");
   const [query, setQuery] = useState("");
   const [selectedProduct, setSelectedProduct] = useState(null);
   const [cart, setCart] = useState([]);
   const [logoTaps, setLogoTaps] = useState(0);
   const [showAdminHint, setShowAdminHint] = useState(false);
+  const [checkoutError, setCheckoutError] = useState("");
   const tapTimer = useRef(null);
 
+  useEffect(() => {
+    let alive = true;
+    Promise.all([fetchCatalog(), fetchCategories(), fetchActivePromotions(), fetchSettings()])
+      .then(([p, c, pr, s]) => {
+        if (!alive) return;
+        setProducts(p);
+        setCategories(c);
+        setPromos(pr);
+        setSettings(s);
+      })
+      .catch((e) => alive && setLoadError(e.message))
+      .finally(() => alive && setLoading(false));
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  const categoryNames = ["Nuevos", ...categories.map((c) => c.name)];
+
   const filtered = useMemo(() => {
-    let list = PRODUCTS;
+    let list = products;
     if (activeCategory !== "Nuevos") list = list.filter((p) => p.category === activeCategory);
     if (query.trim()) {
       const q = query.toLowerCase();
-      list = list.filter((p) => p.name.toLowerCase().includes(q) || p.category.toLowerCase().includes(q));
+      list = list.filter((p) => p.name.toLowerCase().includes(q) || (p.category || "").toLowerCase().includes(q));
     }
     return list;
-  }, [activeCategory, query]);
+  }, [products, activeCategory, query]);
 
   const cartCount = cart.reduce((a, c) => a + c.qty, 0);
   const cartTotal = cart.reduce((a, c) => a + c.qty * c.price, 0);
@@ -125,26 +66,21 @@ export default function StoreApp() {
   }
 
   function addToCart(product, color, size, qty) {
+    const variant = product.statusByVariant[`${color}-${size}`];
     const key = `${product.id}-${color}-${size}`;
-    const maxStock = product.stockByVariant[`${color}-${size}`] ?? 0;
     setCart((prev) => {
       const existing = prev.find((c) => c.key === key);
       if (existing) {
-        return prev.map((c) => (c.key === key ? { ...c, qty: Math.min(maxStock, c.qty + qty) } : c));
+        return prev.map((c) => (c.key === key ? { ...c, qty: c.qty + qty } : c));
       }
-      return [...prev, { key, id: product.id, name: product.name, color, size, qty: Math.min(maxStock, qty), price: product.price, img: product.img, maxStock }];
+      return [...prev, { key, variantId: variant?.id, id: product.id, name: product.name, color, size, qty, price: product.price, img: product.img }];
     });
     setView("home");
   }
 
   function updateQty(key, delta) {
-    setCart((prev) =>
-      prev
-        .map((c) => (c.key === key ? { ...c, qty: Math.max(0, Math.min(c.maxStock ?? Infinity, c.qty + delta)) } : c))
-        .filter((c) => c.qty > 0)
-    );
+    setCart((prev) => prev.map((c) => (c.key === key ? { ...c, qty: Math.max(0, c.qty + delta) } : c)).filter((c) => c.qty > 0));
   }
-
   function removeItem(key) {
     setCart((prev) => prev.filter((c) => c.key !== key));
   }
@@ -161,15 +97,37 @@ export default function StoreApp() {
     }
   }
 
-  function whatsappCheckout() {
+  async function handleCheckout() {
     if (cart.length === 0) return;
-    let msg = "Hola, quiero realizar un pedido en *YEI-SI ROYALE URBAN*.\n\nProductos:\n\n";
-    cart.forEach((c) => {
-      msg += `• ${c.name}\n  Talla: ${c.size} | Color: ${c.color}\n  Cantidad: ${c.qty}\n  Precio: ${money(c.price)}\n\n`;
-    });
-    msg += `Total: ${money(cartTotal)}\n\nQuedo atento.`;
-    const url = `https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent(msg)}`;
-    window.open(url, "_blank");
+    setCheckoutError("");
+    try {
+      await openWhatsappCheckout(cart, {});
+      setCart([]);
+      setView("home");
+    } catch (e) {
+      setCheckoutError("No se pudo registrar el pedido. Intenta de nuevo.");
+    }
+  }
+
+  const brand = settings?.brand || { name: "ROYAL URBAN", slogan: "Viste tu mejor versión", hero_image: "" };
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-[#050505] text-[#f2f2f0] flex items-center justify-center" style={{ fontFamily: "'Inter', sans-serif" }}>
+        <p className="text-sm text-white/40">Cargando catálogo…</p>
+      </div>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <div className="min-h-screen bg-[#050505] text-[#f2f2f0] flex items-center justify-center px-6 text-center" style={{ fontFamily: "'Inter', sans-serif" }}>
+        <div>
+          <p className="text-sm text-[#ff2340] mb-2">No se pudo cargar el catálogo.</p>
+          <p className="text-xs text-white/40">{loadError}</p>
+        </div>
+      </div>
+    );
   }
 
   return (
@@ -182,14 +140,12 @@ export default function StoreApp() {
         .scrollbar-none::-webkit-scrollbar { display: none; }
       `}</style>
 
-      {/* HEADER */}
       <header className="sticky top-0 z-30 bg-[#050505]/90 backdrop-blur border-b border-white/5">
         <div className="flex items-center justify-between px-4 py-3">
           <button onClick={handleLogoTap} className="flex flex-col leading-none active:scale-95 transition-transform">
             <span className="font-display text-lg font-bold tracking-wider">
-              YEI<span className="text-[#ff2340]">-</span>SI
+              ROYAL<span className="text-[#ff2340]"> </span>URBAN
             </span>
-            <span className="text-[8px] tracking-[0.35em] text-[#cda45e]">ROYALE URBAN</span>
           </button>
           <div className="flex items-center gap-3">
             <button className="p-2 text-white/70" onClick={() => setView("search")}>
@@ -209,66 +165,52 @@ export default function StoreApp() {
 
       {showAdminHint && (
         <div className="mx-4 mt-3 p-3 border border-[#cda45e]/40 rounded-lg text-xs text-[#cda45e] flex items-center justify-between">
-          <span>Acceso privado detectado — módulo /admin no incluido en esta vista pública.</span>
+          <span>Acceso privado — ve a /admin para iniciar sesión.</span>
           <button onClick={() => setShowAdminHint(false)} className="ml-2 text-white/50"><X size={14} /></button>
         </div>
       )}
 
-      {/* HOME VIEW */}
       {view === "home" && (
         <main className="pb-24">
-          {/* HERO */}
           <section className="relative mx-4 mt-4 rounded-2xl overflow-hidden h-72 border border-white/5">
-            <img
-              src="https://images.unsplash.com/photo-1483985988355-763728e1935b?w=1200&q=80"
-              alt="YEI-SI ROYALE URBAN"
-              className="absolute inset-0 w-full h-full object-cover"
-              loading="eager"
-              fetchpriority="high"
-            />
+            <img src={brand.hero_image} alt={brand.name} className="absolute inset-0 w-full h-full object-cover" loading="eager" fetchpriority="high" />
             <div className="absolute inset-0 bg-gradient-to-t from-black via-black/40 to-black/10" />
             <div className="absolute bottom-0 p-5">
               <p className="font-display text-3xl font-bold leading-tight">
-                VISTE TU<br /><span className="text-[#cda45e]">MEJOR VERSIÓN</span>
+                {brand.slogan?.split(" ").slice(0, 2).join(" ").toUpperCase()}<br />
+                <span className="text-[#cda45e]">{brand.slogan?.split(" ").slice(2).join(" ").toUpperCase()}</span>
               </p>
               <div className="flex gap-2 mt-4">
-                <button className="px-4 py-2 rounded-full bg-[#f2f2f0] text-black text-xs font-semibold">
-                  VER COLECCIÓN
-                </button>
-                <button
-                  onClick={whatsappCheckout}
-                  className="px-4 py-2 rounded-full border border-[#ff2340] text-[#ff2340] text-xs font-semibold glow-red flex items-center gap-1"
-                >
+                <button className="px-4 py-2 rounded-full bg-[#f2f2f0] text-black text-xs font-semibold">VER COLECCIÓN</button>
+                <button onClick={handleCheckout} className="px-4 py-2 rounded-full border border-[#ff2340] text-[#ff2340] text-xs font-semibold glow-red flex items-center gap-1">
                   <MessageCircle size={13} /> WHATSAPP
                 </button>
               </div>
             </div>
           </section>
 
-          {/* PROMO FEED */}
-          <section className="mt-5 px-4 flex gap-3 overflow-x-auto scrollbar-none">
-            {PROMOS.map((p) => (
-              <div key={p.id} className="min-w-[240px] bg-[#0d0d0d] border border-white/5 rounded-xl p-4 shrink-0">
-                <div className="flex items-center gap-1 text-[#ff2340] text-[10px] font-semibold mb-1">
-                  <Flame size={11} /> CAMPAÑA
+          {promos.length > 0 && (
+            <section className="mt-5 px-4 flex gap-3 overflow-x-auto scrollbar-none">
+              {promos.map((p) => (
+                <div key={p.id} className="min-w-[240px] bg-[#0d0d0d] border border-white/5 rounded-xl p-4 shrink-0">
+                  <div className="flex items-center gap-1 text-[#ff2340] text-[10px] font-semibold mb-1">
+                    <Flame size={11} /> CAMPAÑA
+                  </div>
+                  <p className="font-display text-base font-semibold text-[#f2f2f0]">{p.title}</p>
+                  <p className="text-xs text-white/50 mt-1">{p.description}</p>
+                  {p.cta_label && <button className="text-xs text-[#cda45e] mt-2 underline underline-offset-2">{p.cta_label}</button>}
                 </div>
-                <p className="font-display text-base font-semibold">{p.title}</p>
-                <p className="text-xs text-white/50 mt-1">{p.desc}</p>
-                <button className="text-xs text-[#cda45e] mt-2 underline underline-offset-2">{p.cta}</button>
-              </div>
-            ))}
-          </section>
+              ))}
+            </section>
+          )}
 
-          {/* CATEGORIES */}
           <section className="mt-6 px-4 flex gap-2 overflow-x-auto scrollbar-none">
-            {CATEGORIES.map((c) => (
+            {categoryNames.map((c) => (
               <button
                 key={c}
                 onClick={() => setActiveCategory(c)}
                 className={`shrink-0 px-4 py-1.5 rounded-full text-xs font-medium border transition-all ${
-                  activeCategory === c
-                    ? "bg-[#f2f2f0] text-black border-[#f2f2f0]"
-                    : "border-white/15 text-white/60"
+                  activeCategory === c ? "bg-[#f2f2f0] text-black border-[#f2f2f0]" : "border-white/15 text-white/60"
                 }`}
               >
                 {c}
@@ -276,10 +218,10 @@ export default function StoreApp() {
             ))}
           </section>
 
-          {/* PRODUCT GRID */}
           <section className="mt-5 px-4 grid grid-cols-2 gap-3">
             {filtered.map((p) => {
-              const status = stockStatus(totalStock(p), p.minStock);
+              const status = statusVisual(p.overallStatus);
+              const tag = p.isNew ? "NUEVO" : p.onPromotion ? "OFERTA" : p.featured ? "DESTACADO" : null;
               return (
                 <button
                   key={p.id}
@@ -288,10 +230,8 @@ export default function StoreApp() {
                 >
                   <div className="relative aspect-[3/4]">
                     <img src={p.img} alt={p.name} className="w-full h-full object-cover" loading="lazy" decoding="async" />
-                    {p.tag && (
-                      <span className="absolute top-2 left-2 text-[9px] font-bold px-2 py-0.5 rounded bg-black/70 text-[#cda45e] border border-[#cda45e]/30">
-                        {p.tag}
-                      </span>
+                    {tag && (
+                      <span className="absolute top-2 left-2 text-[9px] font-bold px-2 py-0.5 rounded bg-black/70 text-[#cda45e] border border-[#cda45e]/30">{tag}</span>
                     )}
                   </div>
                   <div className="p-2.5">
@@ -300,34 +240,23 @@ export default function StoreApp() {
                       <span className="text-[#cda45e] font-display text-sm font-semibold">{money(p.price)}</span>
                       {p.oldPrice && <span className="text-[10px] text-white/30 line-through">{money(p.oldPrice)}</span>}
                     </div>
-                    <span className={`inline-block mt-1.5 text-[9px] font-semibold border rounded px-1.5 py-0.5 ${status.cls}`}>
-                      {status.label}
-                    </span>
+                    <span className={`inline-block mt-1.5 text-[9px] font-semibold border rounded px-1.5 py-0.5 ${status.cls}`}>{status.label}</span>
                   </div>
                 </button>
               );
             })}
-            {filtered.length === 0 && (
-              <p className="col-span-2 text-center text-white/40 text-sm py-10">No hay productos en esta categoría todavía.</p>
-            )}
+            {filtered.length === 0 && <p className="col-span-2 text-center text-white/40 text-sm py-10">No hay productos en esta categoría todavía.</p>}
           </section>
         </main>
       )}
 
-      {/* SEARCH VIEW */}
       {view === "search" && (
         <main className="px-4 pt-4 pb-24">
           <div className="flex items-center gap-2 mb-4">
             <button onClick={() => setView("home")} className="p-1"><ChevronLeft size={20} /></button>
             <div className="flex-1 flex items-center gap-2 bg-[#0d0d0d] border border-white/10 rounded-full px-3 py-2">
               <Search size={16} className="text-white/40" />
-              <input
-                autoFocus
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                placeholder="Buscar productos, categorías..."
-                className="bg-transparent outline-none text-sm w-full placeholder:text-white/30"
-              />
+              <input autoFocus value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Buscar productos, categorías..." className="bg-transparent outline-none text-sm w-full placeholder:text-white/30" />
             </div>
           </div>
           <div className="grid grid-cols-2 gap-3">
@@ -344,12 +273,10 @@ export default function StoreApp() {
         </main>
       )}
 
-      {/* PRODUCT DETAIL */}
       {view === "product" && selectedProduct && (
-        <ProductDetail product={selectedProduct} onBack={() => setView("home")} onAdd={addToCart} onWhatsapp={whatsappCheckout} />
+        <ProductDetail product={selectedProduct} onBack={() => setView("home")} onAdd={addToCart} onWhatsapp={handleCheckout} />
       )}
 
-      {/* CART VIEW */}
       {view === "cart" && (
         <main className="px-4 pt-4 pb-32">
           <div className="flex items-center gap-2 mb-4">
@@ -372,17 +299,8 @@ export default function StoreApp() {
                       <div className="flex items-center border border-white/15 rounded-full">
                         <button onClick={() => updateQty(c.key, -1)} className="p-1.5"><Minus size={12} /></button>
                         <span className="text-xs w-5 text-center">{c.qty}</span>
-                        <button
-                          onClick={() => updateQty(c.key, 1)}
-                          disabled={c.qty >= (c.maxStock ?? Infinity)}
-                          className="p-1.5 disabled:opacity-30"
-                        >
-                          <Plus size={12} />
-                        </button>
+                        <button onClick={() => updateQty(c.key, 1)} className="p-1.5"><Plus size={12} /></button>
                       </div>
-                      {c.qty >= (c.maxStock ?? Infinity) && (
-                        <span className="text-[9px] text-[#ff2340]">máx. disponible</span>
-                      )}
                       <button onClick={() => removeItem(c.key)} className="text-[10px] text-white/40 underline">quitar</button>
                     </div>
                   </div>
@@ -391,16 +309,15 @@ export default function StoreApp() {
             </div>
           )}
 
+          {checkoutError && <p className="text-[#ff2340] text-xs mt-3">{checkoutError}</p>}
+
           {cart.length > 0 && (
             <div className="fixed bottom-16 left-0 right-0 bg-[#050505] border-t border-white/10 px-4 py-3">
               <div className="flex justify-between text-sm mb-3">
                 <span className="text-white/60">Total</span>
                 <span className="font-display text-lg font-semibold text-[#cda45e]">{money(cartTotal)}</span>
               </div>
-              <button
-                onClick={whatsappCheckout}
-                className="w-full py-3 rounded-full bg-[#ff2340] text-white text-sm font-semibold flex items-center justify-center gap-2 glow-red-strong"
-              >
+              <button onClick={handleCheckout} className="w-full py-3 rounded-full bg-[#ff2340] text-white text-sm font-semibold flex items-center justify-center gap-2 glow-red-strong">
                 <MessageCircle size={16} /> COMPRAR POR WHATSAPP
               </button>
             </div>
@@ -408,7 +325,6 @@ export default function StoreApp() {
         </main>
       )}
 
-      {/* BOTTOM NAV */}
       {view !== "product" && (
         <nav className="fixed bottom-0 left-0 right-0 bg-[#050505] border-t border-white/10 flex items-center justify-around py-2.5 z-30">
           <NavBtn icon={<Home size={19} />} label="Inicio" active={view === "home"} onClick={() => setView("home")} />
@@ -425,11 +341,7 @@ function NavBtn({ icon, label, active, onClick, badge }) {
   return (
     <button onClick={onClick} className={`relative flex flex-col items-center gap-1 px-3 ${active ? "text-[#ff2340]" : "text-white/50"}`}>
       {icon}
-      {badge > 0 && (
-        <span className="absolute -top-1 right-1 bg-[#ff2340] text-[9px] font-bold rounded-full w-3.5 h-3.5 flex items-center justify-center">
-          {badge}
-        </span>
-      )}
+      {badge > 0 && <span className="absolute -top-1 right-1 bg-[#ff2340] text-[9px] font-bold rounded-full w-3.5 h-3.5 flex items-center justify-center">{badge}</span>}
       <span className="text-[9px] tracking-wide">{label}</span>
     </button>
   );
@@ -440,22 +352,15 @@ function ProductDetail({ product, onBack, onAdd, onWhatsapp }) {
   const [size, setSize] = useState(product.sizes[0]);
   const [qty, setQty] = useState(1);
 
-  const variantStock = product.stockByVariant[`${color}-${size}`] ?? 0;
-  const status = stockStatus(variantStock, product.minStock);
-  const isAvailable = variantStock > 0;
+  const variant = product.statusByVariant[`${color}-${size}`];
+  const status = statusVisual(variant?.status || "agotado");
+  const isAvailable = variant && variant.status !== "agotado";
 
   return (
     <main className="pb-28">
       <div className="relative">
         <img src={product.img} className="w-full aspect-[3/4] object-cover" alt={product.name} loading="eager" fetchpriority="high" />
-        <button onClick={onBack} className="absolute top-4 left-4 bg-black/60 p-2 rounded-full backdrop-blur">
-          <ChevronLeft size={18} />
-        </button>
-        {product.tag && (
-          <span className="absolute top-4 right-4 text-[10px] font-bold px-2.5 py-1 rounded bg-black/70 text-[#cda45e] border border-[#cda45e]/30">
-            {product.tag}
-          </span>
-        )}
+        <button onClick={onBack} className="absolute top-4 left-4 bg-black/60 p-2 rounded-full backdrop-blur"><ChevronLeft size={18} /></button>
       </div>
 
       <div className="px-4 pt-4">
@@ -464,25 +369,14 @@ function ProductDetail({ product, onBack, onAdd, onWhatsapp }) {
           <span className="text-[#cda45e] font-display text-xl">{money(product.price)}</span>
           {product.oldPrice && <span className="text-sm text-white/30 line-through">{money(product.oldPrice)}</span>}
         </div>
-        <span className={`inline-block mt-2 text-[10px] font-semibold border rounded px-2 py-0.5 ${status.cls}`}>
-          {status.label}
-        </span>
-
-        <p className="text-sm text-white/50 mt-4 leading-relaxed">{product.desc}</p>
+        <span className={`inline-block mt-2 text-[10px] font-semibold border rounded px-2 py-0.5 ${status.cls}`}>{status.label}</span>
+        <p className="text-sm text-white/50 mt-4 leading-relaxed">{product.description}</p>
 
         <div className="mt-5">
           <p className="text-xs text-white/40 mb-2 tracking-wide">COLOR</p>
           <div className="flex gap-2 flex-wrap">
             {product.colors.map((c) => (
-              <button
-                key={c}
-                onClick={() => setColor(c)}
-                className={`px-3 py-1.5 rounded-full text-xs border ${
-                  color === c ? "border-[#ff2340] text-[#ff2340] glow-red" : "border-white/15 text-white/60"
-                }`}
-              >
-                {c}
-              </button>
+              <button key={c} onClick={() => setColor(c)} className={`px-3 py-1.5 rounded-full text-xs border ${color === c ? "border-[#ff2340] text-[#ff2340] glow-red" : "border-white/15 text-white/60"}`}>{c}</button>
             ))}
           </div>
         </div>
@@ -491,22 +385,10 @@ function ProductDetail({ product, onBack, onAdd, onWhatsapp }) {
           <p className="text-xs text-white/40 mb-2 tracking-wide">TALLA</p>
           <div className="flex gap-2 flex-wrap">
             {product.sizes.map((s) => {
-              const stock = product.stockByVariant[`${color}-${s}`] ?? 0;
+              const v = product.statusByVariant[`${color}-${s}`];
+              const disabled = !v || v.status === "agotado";
               return (
-                <button
-                  key={s}
-                  onClick={() => setSize(s)}
-                  disabled={stock <= 0}
-                  className={`w-11 h-11 rounded-lg text-xs border flex items-center justify-center ${
-                    stock <= 0
-                      ? "border-white/5 text-white/20 line-through"
-                      : size === s
-                      ? "border-[#ff2340] text-[#ff2340] glow-red"
-                      : "border-white/15 text-white/60"
-                  }`}
-                >
-                  {s}
-                </button>
+                <button key={s} onClick={() => setSize(s)} disabled={disabled} className={`w-11 h-11 rounded-lg text-xs border flex items-center justify-center ${disabled ? "border-white/5 text-white/20 line-through" : size === s ? "border-[#ff2340] text-[#ff2340] glow-red" : "border-white/15 text-white/60"}`}>{s}</button>
               );
             })}
           </div>
@@ -518,28 +400,17 @@ function ProductDetail({ product, onBack, onAdd, onWhatsapp }) {
             <div className="flex items-center border border-white/15 rounded-full">
               <button onClick={() => setQty((q) => Math.max(1, q - 1))} className="p-2"><Minus size={13} /></button>
               <span className="text-sm w-6 text-center">{qty}</span>
-              <button onClick={() => setQty((q) => Math.min(variantStock, q + 1))} className="p-2"><Plus size={13} /></button>
+              <button onClick={() => setQty((q) => q + 1)} className="p-2"><Plus size={13} /></button>
             </div>
           </div>
         )}
       </div>
 
       <div className="fixed bottom-0 left-0 right-0 bg-[#050505] border-t border-white/10 px-4 py-3 flex gap-2">
-        <button
-          disabled={!isAvailable}
-          onClick={() => onAdd(product, color, size, qty)}
-          className={`flex-1 py-3 rounded-full text-sm font-semibold ${
-            isAvailable ? "bg-[#f2f2f0] text-black" : "bg-white/10 text-white/30"
-          }`}
-        >
+        <button disabled={!isAvailable} onClick={() => onAdd(product, color, size, qty)} className={`flex-1 py-3 rounded-full text-sm font-semibold ${isAvailable ? "bg-[#f2f2f0] text-black" : "bg-white/10 text-white/30"}`}>
           {isAvailable ? "AGREGAR AL CARRITO" : "AGOTADO"}
         </button>
-        <button
-          onClick={onWhatsapp}
-          className="w-12 h-12 rounded-full border border-[#ff2340] text-[#ff2340] flex items-center justify-center glow-red shrink-0"
-        >
-          <MessageCircle size={18} />
-        </button>
+        <button onClick={onWhatsapp} className="w-12 h-12 rounded-full border border-[#ff2340] text-[#ff2340] flex items-center justify-center glow-red shrink-0"><MessageCircle size={18} /></button>
       </div>
     </main>
   );

@@ -1,41 +1,82 @@
 // ============================================================
-// YEI-SI ROYALE URBAN — Fase 5: integración WhatsApp end-to-end
-// Conecta: carrito (Fase 2) -> pedido real en Supabase (Fase 4)
-//          -> mensaje WhatsApp -> confirmación admin (Fase 3)
-//          -> descuento de stock vía kardex
+// ROYAL URBAN — capa de datos Supabase
+// Usada por StoreApp.jsx (público) y AdminApp.jsx (privado)
 // ============================================================
 
 import { createClient } from "@supabase/supabase-js";
 
-const supabase = createClient(
+export const supabase = createClient(
   import.meta.env.VITE_SUPABASE_URL,
   import.meta.env.VITE_SUPABASE_ANON_KEY
 );
 
+const STATUS_LABEL = {
+  disponible: { label: "DISPONIBLE", cls: "text-[#cda45e] border-[#cda45e]/40" },
+  ultimas_unidades: { label: "ÚLTIMAS UNIDADES", cls: "text-[#ff2340] border-[#ff2340]/50" },
+  agotado: { label: "AGOTADO", cls: "text-white/40 border-white/15" },
+};
+export function statusVisual(status) {
+  return STATUS_LABEL[status] || STATUS_LABEL.agotado;
+}
+
 // ------------------------------------------------------------
-// 1. CATÁLOGO PÚBLICO (reemplaza los mocks PRODUCTS/PROMOS
-//    del artifact de Fase 2)
+// CATÁLOGO PÚBLICO
 // ------------------------------------------------------------
-export async function fetchPublicProducts() {
+export async function fetchCategories() {
   const { data, error } = await supabase
-    .from("public_products")
-    .select("*, product_variants(id, color_id, size_id)");
+    .from("categories")
+    .select("*")
+    .eq("visible", true)
+    .order("position");
   if (error) throw error;
   return data;
 }
 
-export async function fetchVariantStatus(productId) {
-  // Usa la vista pública: nunca expone el número de stock, solo el estado
-  const { data, error } = await supabase
-    .from("public_product_variants")
-    .select("*")
-    .eq("product_id", productId);
-  if (error) throw error;
-  return data; // [{ id, color_name, size_name, status }]
+// Trae productos + variantes agrupadas (color/talla/estado), listo para
+// render directo — sin exponer nunca el número de stock.
+export async function fetchCatalog() {
+  const [{ data: products, error: pErr }, { data: variants, error: vErr }] = await Promise.all([
+    supabase.from("public_products").select("*, products!inner(id, image_url)"),
+    supabase.from("public_product_variants").select("*"),
+  ]);
+  if (pErr) throw pErr;
+  if (vErr) throw vErr;
+
+  return products.map((p) => {
+    const productVariants = variants.filter((v) => v.product_id === p.products.id);
+    const colors = [...new Set(productVariants.map((v) => v.color_name))];
+    const sizes = [...new Set(productVariants.map((v) => v.size_name))];
+    const statusByVariant = {};
+    productVariants.forEach((v) => {
+      statusByVariant[`${v.color_name}-${v.size_name}`] = { id: v.id, status: v.status };
+    });
+    const overallStatus = productVariants.some((v) => v.status !== "agotado") ? "disponible" : "agotado";
+    return {
+      id: p.products.id,
+      name: p.name,
+      slug: p.slug,
+      description: p.description,
+      price: Number(p.price),
+      oldPrice: p.old_price ? Number(p.old_price) : null,
+      category: p.category_name,
+      img: p.products.image_url,
+      featured: p.featured,
+      isNew: p.is_new,
+      onPromotion: p.on_promotion,
+      colors,
+      sizes,
+      statusByVariant,
+      overallStatus,
+    };
+  });
 }
 
 export async function fetchActivePromotions() {
-  const { data, error } = await supabase.from("promotions").select("*").order("position");
+  const { data, error } = await supabase
+    .from("promotions")
+    .select("*")
+    .eq("active", true)
+    .order("position");
   if (error) throw error;
   return data;
 }
@@ -47,13 +88,8 @@ export async function fetchSettings() {
 }
 
 // ------------------------------------------------------------
-// 2. CREAR PEDIDO (se ejecuta al pulsar "Comprar por WhatsApp"
-//    en el carrito — ANTES de abrir WhatsApp). Esto es lo que
-//    hace que el pedido quede registrado internamente, tal como
-//    pide el punto 18 del brief.
-//    NOTA: no descuenta stock todavía — eso ocurre al confirmar
-//    (ver sección 4), para no bloquear stock por pedidos que
-//    nunca se concretan por WhatsApp.
+// CHECKOUT — crea el pedido real ANTES de abrir WhatsApp,
+// sin descontar stock todavía (eso pasa al confirmar en admin).
 // ------------------------------------------------------------
 export async function createOrderFromCart(cart, customer = {}) {
   const total = cart.reduce((sum, item) => sum + item.qty * item.price, 0);
@@ -72,7 +108,7 @@ export async function createOrderFromCart(cart, customer = {}) {
 
   const items = cart.map((c) => ({
     order_id: order.id,
-    variant_id: c.variantId, // id real de product_variants
+    variant_id: c.variantId ?? null,
     product_name: c.name,
     color_name: c.color,
     size_name: c.size,
@@ -84,23 +120,13 @@ export async function createOrderFromCart(cart, customer = {}) {
   if (itemsErr) throw itemsErr;
 
   const message = buildWhatsappMessage(order, cart);
-
-  const { error: msgErr } = await supabase
-    .from("orders")
-    .update({ whatsapp_message: message })
-    .eq("id", order.id);
-  if (msgErr) throw msgErr;
+  await supabase.from("orders").update({ whatsapp_message: message }).eq("id", order.id);
 
   return { order, message };
 }
 
-// ------------------------------------------------------------
-// 3. MENSAJE DE WHATSAPP — incluye el número de pedido real,
-//    así el admin puede buscarlo directo en el panel al recibir
-//    el chat.
-// ------------------------------------------------------------
 export function buildWhatsappMessage(order, cart) {
-  let msg = `Hola, quiero realizar el pedido *#${order.order_number}* en *YEI-SI ROYALE URBAN*.\n\nProductos:\n\n`;
+  let msg = `Hola, quiero realizar el pedido *#${order.order_number}* en *ROYAL URBAN*.\n\nProductos:\n\n`;
   cart.forEach((c) => {
     msg += `• ${c.name}\n  Talla: ${c.size} | Color: ${c.color}\n  Cantidad: ${c.qty}\n  Precio: $${c.price.toLocaleString("es-CO")}\n\n`;
   });
@@ -109,7 +135,8 @@ export function buildWhatsappMessage(order, cart) {
 }
 
 export async function openWhatsappCheckout(cart, customer = {}) {
-  const { number } = (await fetchSettings()).whatsapp;
+  const settings = await fetchSettings();
+  const number = settings.whatsapp?.number || "573000000000";
   const { order, message } = await createOrderFromCart(cart, customer);
   const url = `https://wa.me/${number}?text=${encodeURIComponent(message)}`;
   window.open(url, "_blank");
@@ -117,55 +144,116 @@ export async function openWhatsappCheckout(cart, customer = {}) {
 }
 
 // ------------------------------------------------------------
-// 4. CONFIRMAR PEDIDO (desde el panel admin, Fase 3, al cambiar
-//    el estado a 'Confirmado'). AQUÍ SÍ se descuenta stock real:
-//    se genera un movimiento 'salida' por cada order_item.
-//    El trigger de la Fase 4 aplica el descuento y bloquea si ya
-//    no hay disponibilidad (por ejemplo, si dos clientes pidieron
-//    la última unidad casi al mismo tiempo por WhatsApp).
+// ADMIN — auth
 // ------------------------------------------------------------
-export async function confirmOrderAndDiscountStock(orderId) {
-  const { data: items, error: itemsErr } = await supabase
-    .from("order_items")
-    .select("*")
-    .eq("order_id", orderId);
-  if (itemsErr) throw itemsErr;
+export async function signIn(email, password) {
+  const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+  if (error) throw error;
+  const { data: profile, error: pErr } = await supabase
+    .from("user_profiles")
+    .select("*, roles(label)")
+    .eq("id", data.user.id)
+    .single();
+  if (pErr) throw pErr;
+  return { user: data.user, profile };
+}
 
-  const movements = items
-    .filter((i) => i.variant_id) // ignora ítems sin variante asociada (legacy/manual)
-    .map((i) => ({
-      variant_id: i.variant_id,
-      type: "salida",
-      qty: i.qty,
-      reason: `Pedido #${orderId}`,
-    }));
+export async function signOut() {
+  await supabase.auth.signOut();
+}
 
-  // Insert secuencial: si un ítem falla por falta de stock, se detiene
-  // y el admin ve exactamente cuál variante quedó sin disponibilidad.
-  for (const m of movements) {
-    const { error } = await supabase.from("inventory_movements").insert(m);
-    if (error) {
-      throw new Error(`No se pudo confirmar el pedido: ${error.message}`);
-    }
-  }
-
-  const { error: statusErr } = await supabase
-    .from("orders")
-    .update({ status: "Confirmado", updated_at: new Date().toISOString() })
-    .eq("id", orderId);
-  if (statusErr) throw statusErr;
+export async function getCurrentSession() {
+  const { data } = await supabase.auth.getSession();
+  if (!data.session) return null;
+  const { data: profile } = await supabase
+    .from("user_profiles")
+    .select("*, roles(label)")
+    .eq("id", data.session.user.id)
+    .single();
+  return profile ? { user: data.session.user, profile } : null;
 }
 
 // ------------------------------------------------------------
-// 5. Puntos de reemplazo en los artifacts existentes
+// ADMIN — datos
 // ------------------------------------------------------------
-// Fase 2 (yeisi-royale-urban.jsx):
-//   - PRODUCTS/PROMOS mock  -> fetchPublicProducts() / fetchActivePromotions()
-//   - stockStatus(qty,min)  -> usar directamente el campo `status` de fetchVariantStatus()
-//   - whatsappCheckout()    -> openWhatsappCheckout(cart, customer)
-//
-// Fase 3 (yeisi-royale-urban-admin.jsx):
-//   - INITIAL_ORDERS mock        -> supabase.from('orders').select('*, order_items(*)')
-//   - updateStatus(id,'Confirmado') -> confirmOrderAndDiscountStock(id) en vez de un simple update
-//   - INITIAL_MOVEMENTS mock     -> supabase.from('inventory_movements').select('*').order('created_at',{ascending:false})
-//   - LoginScreen                -> supabase.auth.signInWithPassword({ email, password })
+export async function fetchAdminProducts() {
+  const { data, error } = await supabase
+    .from("products")
+    .select("*, categories(name)")
+    .order("created_at", { ascending: false });
+  if (error) throw error;
+  return data;
+}
+
+export async function toggleProductActive(id, active) {
+  const { error } = await supabase.from("products").update({ active }).eq("id", id);
+  if (error) throw error;
+}
+
+export async function fetchAdminCategories() {
+  const { data, error } = await supabase.from("categories").select("*").order("position");
+  if (error) throw error;
+  return data;
+}
+
+export async function toggleCategoryVisible(id, visible) {
+  const { error } = await supabase.from("categories").update({ visible }).eq("id", id);
+  if (error) throw error;
+}
+
+export async function fetchInventory() {
+  const { data, error } = await supabase
+    .from("product_variants")
+    .select("id, stock, min_stock, sku, products(name), colors(name), sizes(name)")
+    .order("stock");
+  if (error) throw error;
+  return data;
+}
+
+export async function fetchMovements(limit = 50) {
+  const { data, error } = await supabase
+    .from("inventory_movements")
+    .select("*, product_variants(sku, products(name), colors(name), sizes(name))")
+    .order("created_at", { ascending: false })
+    .limit(limit);
+  if (error) throw error;
+  return data;
+}
+
+export async function registerMovement({ variantId, type, qty, reason }) {
+  const { error } = await supabase
+    .from("inventory_movements")
+    .insert({ variant_id: variantId, type, qty, reason });
+  if (error) throw error;
+}
+
+export async function fetchOrders() {
+  const { data, error } = await supabase
+    .from("orders")
+    .select("*, order_items(*)")
+    .order("created_at", { ascending: false });
+  if (error) throw error;
+  return data;
+}
+
+// Confirmar pedido: genera movimientos 'salida' por cada ítem (el trigger
+// descuenta stock real y bloquea si ya no hay disponibilidad) y solo
+// entonces marca el pedido como Confirmado.
+export async function updateOrderStatus(orderId, status, orderItems = []) {
+  if (status === "Confirmado") {
+    for (const item of orderItems) {
+      if (!item.variant_id) continue;
+      const { error } = await supabase
+        .from("inventory_movements")
+        .insert({ variant_id: item.variant_id, type: "salida", qty: item.qty, reason: `Pedido #${orderId}` });
+      if (error) throw new Error(`No se pudo confirmar: ${error.message}`);
+    }
+  }
+  const { error } = await supabase.from("orders").update({ status, updated_at: new Date().toISOString() }).eq("id", orderId);
+  if (error) throw error;
+}
+
+export async function updateSettings(key, value) {
+  const { error } = await supabase.from("settings").update({ value, updated_at: new Date().toISOString() }).eq("key", key);
+  if (error) throw error;
+}
