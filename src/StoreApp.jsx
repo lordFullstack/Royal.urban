@@ -24,9 +24,6 @@ export default function StoreApp() {
   const [selectedProduct, setSelectedProduct] = useState(null);
   const [cart, setCart] = useState([]);
   const [logoTaps, setLogoTaps] = useState(0);
-  const [showPinModal, setShowPinModal] = useState(false);
-  const [pinValue, setPinValue] = useState("");
-  const [pinError, setPinError] = useState("");
   const [checkoutError, setCheckoutError] = useState("");
   const tapTimer = useRef(null);
 
@@ -92,27 +89,12 @@ export default function StoreApp() {
     const next = logoTaps + 1;
     setLogoTaps(next);
     if (next >= 5) {
-      setPinValue("");
-      setPinError("");
-      setShowPinModal(true);
       setLogoTaps(0);
+      // Navega al panel admin (HTML independiente, ver admin/index.html).
+      // 'admin/' es relativo, así que respeta cualquier subruta de GitHub Pages.
+      window.location.href = "admin/";
     } else {
       tapTimer.current = setTimeout(() => setLogoTaps(0), 1200);
-    }
-  }
-
-  function submitAdminPin(e) {
-    e.preventDefault();
-    const correctPin = import.meta.env.VITE_ADMIN_PIN;
-    if (!correctPin) {
-      setPinError("No hay PIN configurado (VITE_ADMIN_PIN).");
-      return;
-    }
-    if (pinValue === correctPin) {
-      window.location.href = `${import.meta.env.BASE_URL}admin/`;
-    } else {
-      setPinError("PIN incorrecto.");
-      setPinValue("");
     }
   }
 
@@ -182,36 +164,6 @@ export default function StoreApp() {
         </div>
       </header>
 
-      {showPinModal && (
-        <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center px-6" onClick={() => setShowPinModal(false)}>
-          <form
-            onSubmit={submitAdminPin}
-            onClick={(e) => e.stopPropagation()}
-            className="w-full max-w-xs bg-[#0d0d0d] border border-[#cda45e]/40 rounded-2xl p-5"
-          >
-            <p className="text-xs tracking-widest text-[#cda45e] mb-3">ACCESO PRIVADO</p>
-            <input
-              type="password"
-              inputMode="numeric"
-              autoFocus
-              value={pinValue}
-              onChange={(e) => { setPinValue(e.target.value); setPinError(""); }}
-              placeholder="PIN"
-              className="w-full bg-black/40 border border-white/10 rounded-lg px-3 py-2.5 text-sm outline-none focus:border-[#cda45e]/60 text-center tracking-[0.4em]"
-            />
-            {pinError && <p className="text-[#ff2340] text-xs mt-2">{pinError}</p>}
-            <div className="flex gap-2 mt-4">
-              <button type="button" onClick={() => setShowPinModal(false)} className="flex-1 py-2.5 rounded-lg border border-white/10 text-white/60 text-sm">
-                Cancelar
-              </button>
-              <button type="submit" className="flex-1 py-2.5 rounded-lg bg-[#f2f2f0] text-black text-sm font-semibold">
-                Entrar
-              </button>
-            </div>
-          </form>
-        </div>
-      )}
-
       {view === "home" && (
         <main className="pb-24">
           <section className="relative mx-4 mt-4 rounded-2xl overflow-hidden h-72 border border-white/5">
@@ -238,8 +190,8 @@ export default function StoreApp() {
                   <div className="flex items-center gap-1 text-[#ff2340] text-[10px] font-semibold mb-1">
                     <Flame size={11} /> CAMPAÑA
                   </div>
-                  <p className="font-display text-base font-semibold text-white">{p.title}</p>
-                  <p className="text-xs text-white mt-1">{p.description}</p>
+                  <p className="font-display text-base font-semibold text-[#f2f2f0]">{p.title}</p>
+                  <p className="text-xs text-white/50 mt-1">{p.description}</p>
                   {p.cta_label && <button className="text-xs text-[#cda45e] mt-2 underline underline-offset-2">{p.cta_label}</button>}
                 </div>
               ))}

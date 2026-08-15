@@ -36,14 +36,14 @@ export async function fetchCategories() {
 // render directo — sin exponer nunca el número de stock.
 export async function fetchCatalog() {
   const [{ data: products, error: pErr }, { data: variants, error: vErr }] = await Promise.all([
-    supabase.from("public_products").select("*"),
+    supabase.from("public_products").select("*, products!inner(id, image_url)"),
     supabase.from("public_product_variants").select("*"),
   ]);
   if (pErr) throw pErr;
   if (vErr) throw vErr;
 
   return products.map((p) => {
-    const productVariants = variants.filter((v) => v.product_id === p.id);
+    const productVariants = variants.filter((v) => v.product_id === p.products.id);
     const colors = [...new Set(productVariants.map((v) => v.color_name))];
     const sizes = [...new Set(productVariants.map((v) => v.size_name))];
     const statusByVariant = {};
@@ -52,14 +52,14 @@ export async function fetchCatalog() {
     });
     const overallStatus = productVariants.some((v) => v.status !== "agotado") ? "disponible" : "agotado";
     return {
-      id: p.id,
+      id: p.products.id,
       name: p.name,
       slug: p.slug,
       description: p.description,
       price: Number(p.price),
       oldPrice: p.old_price ? Number(p.old_price) : null,
       category: p.category_name,
-      img: p.image_url,
+      img: p.products.image_url,
       featured: p.featured,
       isNew: p.is_new,
       onPromotion: p.on_promotion,
