@@ -1,12 +1,13 @@
 import React, { useState, useEffect } from "react";
 import {
   Lock, LayoutDashboard, Shirt, Layers, Boxes, ArrowLeftRight, ClipboardList,
-  Settings, LogOut, Plus, Search, AlertTriangle, PackageX, Star, Menu,
+  Settings, LogOut, Plus, Search, AlertTriangle, PackageX, Star, Menu, Trash2, Pencil, Image as ImageIcon,
 } from "lucide-react";
 import {
   signIn, signOut, getCurrentSession,
   fetchAdminProducts, toggleProductActive,
-  fetchAdminCategories, toggleCategoryVisible,
+  fetchAdminCategories, toggleCategoryVisible, createCategory, updateCategoryName, deleteCategory,
+  fetchAdminPromotions, createPromotion, updatePromotion, togglePromotionActive, deletePromotion,
   fetchInventory, fetchMovements, registerMovement,
   fetchOrders, updateOrderStatus,
   fetchSettings, updateSettings,
@@ -39,8 +40,8 @@ export default function AdminApp() {
 
   const role = session.profile?.role_id || "editor";
   const roleSections = {
-    admin: ["dashboard", "productos", "categorias", "inventario", "movimientos", "pedidos", "configuracion"],
-    editor: ["dashboard", "productos", "categorias", "pedidos"],
+    admin: ["dashboard", "productos", "categorias", "promociones", "inventario", "movimientos", "pedidos", "configuracion"],
+    editor: ["dashboard", "productos", "categorias", "promociones", "pedidos"],
     inventario: ["dashboard", "inventario", "movimientos"],
   }[role] || ["dashboard"];
 
@@ -78,6 +79,7 @@ export default function AdminApp() {
         {section === "dashboard" && <Dashboard />}
         {section === "productos" && roleSections.includes("productos") && <Productos />}
         {section === "categorias" && roleSections.includes("categorias") && <Categorias />}
+        {section === "promociones" && roleSections.includes("promociones") && <Promociones />}
         {section === "inventario" && roleSections.includes("inventario") && <Inventario />}
         {section === "movimientos" && roleSections.includes("movimientos") && <Movimientos />}
         {section === "pedidos" && roleSections.includes("pedidos") && <Pedidos />}
@@ -92,6 +94,7 @@ function SidebarContent({ role, section, setSection, sections, onLogout }) {
     { id: "dashboard", label: "Dashboard", icon: <LayoutDashboard size={16} /> },
     { id: "productos", label: "Productos", icon: <Shirt size={16} /> },
     { id: "categorias", label: "Categorías", icon: <Layers size={16} /> },
+    { id: "promociones", label: "Campañas", icon: <ImageIcon size={16} /> },
     { id: "inventario", label: "Inventario", icon: <Boxes size={16} /> },
     { id: "movimientos", label: "Movimientos", icon: <ArrowLeftRight size={16} /> },
     { id: "pedidos", label: "Pedidos", icon: <ClipboardList size={16} /> },
@@ -287,30 +290,190 @@ function Productos() {
 
 function Categorias() {
   const [cats, setCats] = useState([]);
-  useEffect(() => { fetchAdminCategories().then(setCats); }, []);
+  const [newName, setNewName] = useState("");
+  const [editingId, setEditingId] = useState(null);
+  const [editName, setEditName] = useState("");
+  const [error, setError] = useState("");
+
+  function reload() { fetchAdminCategories().then(setCats); }
+  useEffect(reload, []);
 
   async function toggle(id, visible) {
     await toggleCategoryVisible(id, !visible);
     setCats((prev) => prev.map((c) => (c.id === id ? { ...c, visible: !visible } : c)));
   }
 
+  async function addCategory(e) {
+    e.preventDefault();
+    if (!newName.trim()) return;
+    setError("");
+    try {
+      await createCategory(newName.trim());
+      setNewName("");
+      reload();
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
+  function startEdit(c) {
+    setEditingId(c.id);
+    setEditName(c.name);
+  }
+
+  async function saveEdit(id) {
+    if (!editName.trim()) return;
+    try {
+      await updateCategoryName(id, editName.trim());
+      setEditingId(null);
+      reload();
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
+  async function remove(id) {
+    if (!confirm("¿Eliminar esta categoría? Los productos que la usan quedarán sin categoría.")) return;
+    try {
+      await deleteCategory(id);
+      reload();
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
+  return (
+    <div>
+      <h1 className="font-display text-xl font-semibold mb-5">CATEGORÍAS</h1>
+
+      <form onSubmit={addCategory} className="flex gap-2 mb-4 max-w-md">
+        <input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="Nombre de la nueva categoría" className="flex-1 bg-[#0d0d0d] border border-white/10 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#ff2340]/40" />
+        <button type="submit" className="flex items-center gap-1.5 text-xs bg-[#f2f2f0] text-black font-semibold px-3 py-2 rounded-lg shrink-0">
+          <Plus size={14} /> Crear
+        </button>
+      </form>
+      {error && <p className="text-[#ff2340] text-xs mb-3">{error}</p>}
+
+      <div className="space-y-2">
+        {cats.map((c) => (
+          <div key={c.id} className="flex items-center justify-between bg-[#0d0d0d] border border-white/5 rounded-lg px-4 py-3 gap-2">
+            {editingId === c.id ? (
+              <input
+                autoFocus
+                value={editName}
+                onChange={(e) => setEditName(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && saveEdit(c.id)}
+                onBlur={() => saveEdit(c.id)}
+                className="flex-1 bg-black/40 border border-white/10 rounded px-2 py-1 text-sm outline-none"
+              />
+            ) : (
+              <p className="text-sm font-medium">{c.name}</p>
+            )}
+            <div className="flex items-center gap-2 shrink-0">
+              <button onClick={() => toggle(c.id, c.visible)} className={`text-[10px] font-semibold border rounded-full px-2 py-0.5 ${c.visible ? "text-[#cda45e] border-[#cda45e]/30" : "text-white/30 border-white/10"}`}>
+                {c.visible ? "VISIBLE" : "OCULTA"}
+              </button>
+              <button onClick={() => startEdit(c)} className="text-white/40 hover:text-white/80 p-1"><Pencil size={14} /></button>
+              <button onClick={() => remove(c.id)} className="text-white/40 hover:text-[#ff2340] p-1"><Trash2 size={14} /></button>
+            </div>
+          </div>
+        ))}
+        {cats.length === 0 && <p className="text-white/40 text-sm">No hay categorías todavía.</p>}
+      </div>
+    </div>
+  );
+}
+
+function Promociones() {
+  const [promos, setPromos] = useState([]);
+  const [showForm, setShowForm] = useState(false);
+  const [editing, setEditing] = useState(null); // null = crear, objeto = editar
+  const [form, setForm] = useState({ title: "", description: "", image_url: "", cta_label: "" });
+  const [error, setError] = useState("");
+
+  function reload() { fetchAdminPromotions().then(setPromos); }
+  useEffect(reload, []);
+
+  function openCreate() {
+    setEditing(null);
+    setForm({ title: "", description: "", image_url: "", cta_label: "" });
+    setShowForm(true);
+  }
+  function openEdit(p) {
+    setEditing(p);
+    setForm({ title: p.title, description: p.description || "", image_url: p.image_url || "", cta_label: p.cta_label || "" });
+    setShowForm(true);
+  }
+
+  async function submit(e) {
+    e.preventDefault();
+    setError("");
+    try {
+      if (editing) await updatePromotion(editing.id, form);
+      else await createPromotion(form);
+      setShowForm(false);
+      reload();
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
+  async function toggle(id, active) {
+    await togglePromotionActive(id, !active);
+    reload();
+  }
+
+  async function remove(id) {
+    if (!confirm("¿Eliminar esta tarjeta de campaña?")) return;
+    await deletePromotion(id);
+    reload();
+  }
+
   return (
     <div>
       <div className="flex items-center justify-between mb-5">
-        <h1 className="font-display text-xl font-semibold">CATEGORÍAS</h1>
-        <button className="flex items-center gap-1.5 text-xs bg-[#f2f2f0] text-black font-semibold px-3 py-2 rounded-lg opacity-60 cursor-not-allowed" title="Crear categoría: pendiente de formulario completo">
-          <Plus size={14} /> Nueva categoría
+        <h1 className="font-display text-xl font-semibold">CAMPAÑAS</h1>
+        <button onClick={openCreate} className="flex items-center gap-1.5 text-xs bg-[#f2f2f0] text-black font-semibold px-3 py-2 rounded-lg">
+          <Plus size={14} /> Nueva tarjeta
         </button>
       </div>
-      <div className="space-y-2">
-        {cats.map((c) => (
-          <div key={c.id} className="flex items-center justify-between bg-[#0d0d0d] border border-white/5 rounded-lg px-4 py-3">
-            <p className="text-sm font-medium">{c.name}</p>
-            <button onClick={() => toggle(c.id, c.visible)} className={`text-[10px] font-semibold border rounded-full px-2 py-0.5 ${c.visible ? "text-[#cda45e] border-[#cda45e]/30" : "text-white/30 border-white/10"}`}>
-              {c.visible ? "VISIBLE" : "OCULTA"}
-            </button>
+
+      {showForm && (
+        <div className="fixed inset-0 bg-black/70 z-50 flex items-end md:items-center justify-center" onClick={() => setShowForm(false)}>
+          <form onSubmit={submit} onClick={(e) => e.stopPropagation()} className="bg-[#0d0d0d] border border-white/10 rounded-t-2xl md:rounded-2xl w-full md:max-w-md p-5">
+            <p className="font-display text-base font-semibold mb-4">{editing ? "EDITAR TARJETA" : "NUEVA TARJETA"}</p>
+            <div className="space-y-3">
+              <input required value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} placeholder="Título (ej. COLECCIÓN NOCTURNA)" className="w-full bg-black/40 border border-white/10 rounded-lg px-3 py-2 text-sm outline-none" />
+              <input value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} placeholder="Descripción" className="w-full bg-black/40 border border-white/10 rounded-lg px-3 py-2 text-sm outline-none" />
+              <input value={form.image_url} onChange={(e) => setForm({ ...form, image_url: e.target.value })} placeholder="URL de imagen (opcional)" className="w-full bg-black/40 border border-white/10 rounded-lg px-3 py-2 text-sm outline-none" />
+              <input value={form.cta_label} onChange={(e) => setForm({ ...form, cta_label: e.target.value })} placeholder="Texto del botón (ej. Ver colección)" className="w-full bg-black/40 border border-white/10 rounded-lg px-3 py-2 text-sm outline-none" />
+              {error && <p className="text-[#ff2340] text-xs">{error}</p>}
+              <button type="submit" className="w-full py-2.5 rounded-lg bg-[#f2f2f0] text-black text-sm font-semibold">{editing ? "Guardar cambios" : "Crear tarjeta"}</button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      <div className="grid sm:grid-cols-2 gap-3">
+        {promos.map((p) => (
+          <div key={p.id} className="bg-[#0d0d0d] border border-white/5 rounded-xl p-4">
+            <div className="flex items-start justify-between gap-2">
+              <div>
+                <p className="font-display text-sm font-semibold">{p.title}</p>
+                <p className="text-xs text-white/40 mt-1">{p.description}</p>
+                {p.cta_label && <p className="text-[10px] text-[#cda45e] mt-2 underline underline-offset-2">{p.cta_label}</p>}
+              </div>
+              <button onClick={() => toggle(p.id, p.active)} className={`text-[10px] font-semibold border rounded-full px-2 py-0.5 shrink-0 ${p.active ? "text-[#cda45e] border-[#cda45e]/30" : "text-white/30 border-white/10"}`}>
+                {p.active ? "ACTIVA" : "OCULTA"}
+              </button>
+            </div>
+            <div className="flex items-center gap-3 mt-3 pt-3 border-t border-white/5">
+              <button onClick={() => openEdit(p)} className="text-xs text-white/50 hover:text-white/90 flex items-center gap-1"><Pencil size={12} /> Editar</button>
+              <button onClick={() => remove(p.id)} className="text-xs text-white/50 hover:text-[#ff2340] flex items-center gap-1"><Trash2 size={12} /> Eliminar</button>
+            </div>
           </div>
         ))}
+        {promos.length === 0 && <p className="text-white/40 text-sm">No hay tarjetas de campaña todavía.</p>}
       </div>
     </div>
   );
@@ -518,6 +681,10 @@ function Configuracion() {
       <SectionBlock title="MARCA">
         <Field label="Nombre" value={settings.brand?.name || ""} onChange={(v) => set("brand", "name", v)} />
         <Field label="Eslogan" value={settings.brand?.slogan || ""} onChange={(v) => set("brand", "slogan", v)} />
+        <Field label="Imagen de portada (URL)" value={settings.brand?.hero_image || ""} onChange={(v) => set("brand", "hero_image", v)} placeholder="https://..." />
+        {settings.brand?.hero_image && (
+          <img src={settings.brand.hero_image} alt="Vista previa de portada" className="w-full h-32 object-cover rounded-lg border border-white/10 mt-1" />
+        )}
       </SectionBlock>
 
       <SectionBlock title="WHATSAPP">

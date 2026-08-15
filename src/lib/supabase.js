@@ -201,6 +201,65 @@ export async function toggleCategoryVisible(id, visible) {
   if (error) throw error;
 }
 
+function slugify(text) {
+  return text
+    .toLowerCase()
+    .normalize("NFD").replace(/[\u0300-\u036f]/g, "") // quita tildes
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/(^-|-$)/g, "");
+}
+
+export async function createCategory(name) {
+  const slug = slugify(name);
+  const { data: maxRow } = await supabase.from("categories").select("position").order("position", { ascending: false }).limit(1).single();
+  const nextPosition = (maxRow?.position ?? 0) + 1;
+  const { error } = await supabase.from("categories").insert({ name, slug, position: nextPosition });
+  if (error) throw error;
+}
+
+export async function updateCategoryName(id, name) {
+  const { error } = await supabase.from("categories").update({ name, slug: slugify(name) }).eq("id", id);
+  if (error) throw error;
+}
+
+export async function deleteCategory(id) {
+  const { error } = await supabase.from("categories").delete().eq("id", id);
+  if (error) throw error;
+}
+
+// ------------------------------------------------------------
+// PROMOCIONES / MURO SOCIAL (tarjetas de campaña)
+// ------------------------------------------------------------
+export async function fetchAdminPromotions() {
+  const { data, error } = await supabase.from("promotions").select("*").order("position");
+  if (error) throw error;
+  return data;
+}
+
+export async function createPromotion({ title, description, image_url, cta_label }) {
+  const { data: maxRow } = await supabase.from("promotions").select("position").order("position", { ascending: false }).limit(1).single();
+  const nextPosition = (maxRow?.position ?? 0) + 1;
+  const { error } = await supabase
+    .from("promotions")
+    .insert({ title, description, image_url, cta_label, active: true, position: nextPosition });
+  if (error) throw error;
+}
+
+export async function updatePromotion(id, { title, description, image_url, cta_label }) {
+  const { error } = await supabase.from("promotions").update({ title, description, image_url, cta_label }).eq("id", id);
+  if (error) throw error;
+}
+
+export async function togglePromotionActive(id, active) {
+  const { error } = await supabase.from("promotions").update({ active }).eq("id", id);
+  if (error) throw error;
+}
+
+export async function deletePromotion(id) {
+  const { error } = await supabase.from("promotions").delete().eq("id", id);
+  if (error) throw error;
+}
+
 export async function fetchInventory() {
   const { data, error } = await supabase
     .from("product_variants")
