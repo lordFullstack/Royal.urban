@@ -238,8 +238,8 @@ export default function StoreApp() {
                   <div className="flex items-center gap-1 text-[#ff2340] text-[10px] font-semibold mb-1">
                     <Flame size={11} /> CAMPAÑA
                   </div>
-                  <p className="font-display text-base font-semibold text-[#f2f2f0]">{p.title}</p>
-                  <p className="text-xs text-white/50 mt-1">{p.description}</p>
+                  <p className="font-display text-base font-semibold text-white">{p.title}</p>
+                  <p className="text-xs text-white mt-1">{p.description}</p>
                   {p.cta_label && <button className="text-xs text-[#cda45e] mt-2 underline underline-offset-2">{p.cta_label}</button>}
                 </div>
               ))}
