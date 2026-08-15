@@ -10,7 +10,7 @@ import {
   fetchAdminPromotions, createPromotion, updatePromotion, togglePromotionActive, deletePromotion,
   fetchInventory, fetchMovements, registerMovement,
   fetchOrders, updateOrderStatus,
-  fetchSettings, updateSettings,
+  fetchSettings, updateSettings, uploadImage,
 } from "./lib/supabase";
 
 function money(n) {
@@ -390,6 +390,7 @@ function Promociones() {
   const [editing, setEditing] = useState(null); // null = crear, objeto = editar
   const [form, setForm] = useState({ title: "", description: "", image_url: "", cta_label: "" });
   const [error, setError] = useState("");
+  const [uploading, setUploading] = useState(false);
 
   function reload() { fetchAdminPromotions().then(setPromos); }
   useEffect(reload, []);
@@ -415,6 +416,22 @@ function Promociones() {
       reload();
     } catch (err) {
       setError(err.message);
+    }
+  }
+
+  async function handleImageUpload(e) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploading(true);
+    setError("");
+    try {
+      const url = await uploadImage(file, "promotions");
+      setForm((f) => ({ ...f, image_url: url }));
+    } catch (err) {
+      setError("No se pudo subir la imagen: " + err.message);
+    } finally {
+      setUploading(false);
+      e.target.value = "";
     }
   }
 
@@ -445,7 +462,18 @@ function Promociones() {
             <div className="space-y-3">
               <input required value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} placeholder="Título (ej. COLECCIÓN NOCTURNA)" className="w-full bg-black/40 border border-white/10 rounded-lg px-3 py-2 text-sm outline-none" />
               <input value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} placeholder="Descripción" className="w-full bg-black/40 border border-white/10 rounded-lg px-3 py-2 text-sm outline-none" />
-              <input value={form.image_url} onChange={(e) => setForm({ ...form, image_url: e.target.value })} placeholder="URL de imagen (opcional)" className="w-full bg-black/40 border border-white/10 rounded-lg px-3 py-2 text-sm outline-none" />
+
+              <div>
+                {form.image_url && (
+                  <img src={form.image_url} alt="Vista previa" className="w-full h-24 object-cover rounded-lg border border-white/10 mb-2" />
+                )}
+                <label className="inline-flex items-center gap-2 text-xs bg-black/40 border border-white/10 rounded-lg px-3 py-2 cursor-pointer hover:border-[#ff2340]/40 w-fit">
+                  <ImageIcon size={14} />
+                  {uploading ? "Subiendo…" : "Subir imagen"}
+                  <input type="file" accept="image/*" className="hidden" onChange={handleImageUpload} disabled={uploading} />
+                </label>
+              </div>
+
               <input value={form.cta_label} onChange={(e) => setForm({ ...form, cta_label: e.target.value })} placeholder="Texto del botón (ej. Ver colección)" className="w-full bg-black/40 border border-white/10 rounded-lg px-3 py-2 text-sm outline-none" />
               {error && <p className="text-[#ff2340] text-xs">{error}</p>}
               <button type="submit" className="w-full py-2.5 rounded-lg bg-[#f2f2f0] text-black text-sm font-semibold">{editing ? "Guardar cambios" : "Crear tarjeta"}</button>
@@ -656,6 +684,8 @@ function Pedidos() {
 function Configuracion() {
   const [settings, setSettingsState] = useState(null);
   const [saved, setSaved] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState("");
 
   useEffect(() => { fetchSettings().then(setSettingsState); }, []);
 
@@ -674,6 +704,22 @@ function Configuracion() {
 
   const set = (group, key, value) => setSettingsState((s) => ({ ...s, [group]: { ...s[group], [key]: value } }));
 
+  async function handleHeroUpload(e) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploading(true);
+    setUploadError("");
+    try {
+      const url = await uploadImage(file, "brand");
+      set("brand", "hero_image", url);
+    } catch (err) {
+      setUploadError("No se pudo subir la imagen: " + err.message);
+    } finally {
+      setUploading(false);
+      e.target.value = "";
+    }
+  }
+
   return (
     <div className="max-w-xl">
       <h1 className="font-display text-xl font-semibold mb-5">CONFIGURACIÓN</h1>
@@ -681,10 +727,20 @@ function Configuracion() {
       <SectionBlock title="MARCA">
         <Field label="Nombre" value={settings.brand?.name || ""} onChange={(v) => set("brand", "name", v)} />
         <Field label="Eslogan" value={settings.brand?.slogan || ""} onChange={(v) => set("brand", "slogan", v)} />
-        <Field label="Imagen de portada (URL)" value={settings.brand?.hero_image || ""} onChange={(v) => set("brand", "hero_image", v)} placeholder="https://..." />
-        {settings.brand?.hero_image && (
-          <img src={settings.brand.hero_image} alt="Vista previa de portada" className="w-full h-32 object-cover rounded-lg border border-white/10 mt-1" />
-        )}
+
+        <div>
+          <label className="text-xs text-white/50 block mb-1">Imagen de portada</label>
+          {settings.brand?.hero_image && (
+            <img src={settings.brand.hero_image} alt="Vista previa de portada" className="w-full h-32 object-cover rounded-lg border border-white/10 mb-2" />
+          )}
+          <label className="inline-flex items-center gap-2 text-xs bg-black/40 border border-white/10 rounded-lg px-3 py-2 cursor-pointer hover:border-[#ff2340]/40 w-fit">
+            <ImageIcon size={14} />
+            {uploading ? "Subiendo…" : "Subir imagen"}
+            <input type="file" accept="image/*" className="hidden" onChange={handleHeroUpload} disabled={uploading} />
+          </label>
+          {uploadError && <p className="text-[#ff2340] text-xs mt-1">{uploadError}</p>}
+          <p className="text-[10px] text-white/30 mt-1">Tamaño ideal: 1600×900px, menos de 300KB.</p>
+        </div>
       </SectionBlock>
 
       <SectionBlock title="WHATSAPP">
