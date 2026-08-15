@@ -202,6 +202,68 @@ export async function toggleProductActive(id, active) {
   if (error) throw error;
 }
 
+export async function fetchColors() {
+  const { data, error } = await supabase.from("colors").select("*").order("name");
+  if (error) throw error;
+  return data;
+}
+
+export async function fetchSizes() {
+  const { data, error } = await supabase.from("sizes").select("*").order("position");
+  if (error) throw error;
+  return data;
+}
+
+function slugifyProduct(text) {
+  return text
+    .toLowerCase()
+    .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/(^-|-$)/g, "");
+}
+
+// Crea el producto y, si se seleccionaron colores/tallas, genera automáticamente
+// la matriz de variantes (con stock en 0 — el stock real se carga después desde
+// Movimientos, tal como pide la regla de negocio: todo cambio de stock pasa por el kardex).
+export async function createProductWithVariants({
+  name, description, categoryId, price, oldPrice, skuBase, featured, isNew, imageUrl,
+  colorIds = [], sizeIds = [], minStock = 3,
+}) {
+  const slug = slugifyProduct(name);
+  const { data: product, error: pErr } = await supabase
+    .from("products")
+    .insert({
+      name, slug, description: description || null,
+      category_id: categoryId || null,
+      price, old_price: oldPrice || null,
+      sku_base: skuBase || null,
+      featured: !!featured, is_new: !!isNew,
+      image_url: imageUrl || null,
+      active: true,
+    })
+    .select()
+    .single();
+  if (pErr) throw pErr;
+
+  if (colorIds.length && sizeIds.length) {
+    const variants = [];
+    for (const colorId of colorIds) {
+      for (const sizeId of sizeIds) {
+        variants.push({ product_id: product.id, color_id: colorId, size_id: sizeId, min_stock: minStock, stock: 0 });
+      }
+    }
+    const { error: vErr } = await supabase.from("product_variants").insert(variants);
+    if (vErr) throw vErr;
+  }
+
+  return product;
+}
+
+export async function deleteProduct(id) {
+  const { error } = await supabase.from("products").delete().eq("id", id);
+  if (error) throw error;
+}
+
 export async function fetchAdminCategories() {
   const { data, error } = await supabase.from("categories").select("*").order("position");
   if (error) throw error;

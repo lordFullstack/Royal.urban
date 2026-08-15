@@ -5,7 +5,7 @@ import {
 } from "lucide-react";
 import {
   signIn, signOut, getCurrentSession,
-  fetchAdminProducts, toggleProductActive,
+  fetchAdminProducts, toggleProductActive, createProductWithVariants, deleteProduct, fetchColors, fetchSizes,
   fetchAdminCategories, toggleCategoryVisible, createCategory, updateCategoryName, deleteCategory,
   fetchAdminPromotions, createPromotion, updatePromotion, togglePromotionActive, deletePromotion,
   fetchInventory, fetchMovements, registerMovement,
@@ -232,14 +232,92 @@ function Dashboard() {
 
 function Productos() {
   const [products, setProducts] = useState([]);
+  const [categories, setCategories] = useState([]);
+  const [colors, setColors] = useState([]);
+  const [sizes, setSizes] = useState([]);
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(true);
+  const [showForm, setShowForm] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [error, setError] = useState("");
+  const emptyForm = { name: "", description: "", categoryId: "", price: "", oldPrice: "", skuBase: "", featured: false, isNew: false, imageUrl: "", colorIds: [], sizeIds: [] };
+  const [form, setForm] = useState(emptyForm);
 
-  useEffect(() => { fetchAdminProducts().then(setProducts).finally(() => setLoading(false)); }, []);
+  function reload() { fetchAdminProducts().then(setProducts).finally(() => setLoading(false)); }
+  useEffect(() => {
+    reload();
+    fetchAdminCategories().then(setCategories);
+    fetchColors().then(setColors);
+    fetchSizes().then(setSizes);
+  }, []);
 
   async function toggle(id, active) {
     await toggleProductActive(id, !active);
     setProducts((prev) => prev.map((p) => (p.id === id ? { ...p, active: !active } : p)));
+  }
+
+  async function remove(id) {
+    if (!confirm("¿Eliminar este producto? También se borran sus variantes.")) return;
+    await deleteProduct(id);
+    reload();
+  }
+
+  function openCreate() {
+    setForm(emptyForm);
+    setError("");
+    setShowForm(true);
+  }
+
+  function toggleIn(list, id) {
+    return list.includes(id) ? list.filter((x) => x !== id) : [...list, id];
+  }
+
+  async function handleImageUpload(e) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploading(true);
+    setError("");
+    try {
+      const url = await uploadImage(file, "products");
+      setForm((f) => ({ ...f, imageUrl: url }));
+    } catch (err) {
+      setError("No se pudo subir la imagen: " + err.message);
+    } finally {
+      setUploading(false);
+      e.target.value = "";
+    }
+  }
+
+  async function submit(e) {
+    e.preventDefault();
+    setError("");
+    if (!form.name.trim() || !form.price) {
+      setError("Nombre y precio son obligatorios.");
+      return;
+    }
+    setSaving(true);
+    try {
+      await createProductWithVariants({
+        name: form.name.trim(),
+        description: form.description,
+        categoryId: form.categoryId || null,
+        price: Number(form.price),
+        oldPrice: form.oldPrice ? Number(form.oldPrice) : null,
+        skuBase: form.skuBase,
+        featured: form.featured,
+        isNew: form.isNew,
+        imageUrl: form.imageUrl,
+        colorIds: form.colorIds,
+        sizeIds: form.sizeIds,
+      });
+      setShowForm(false);
+      reload();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSaving(false);
+    }
   }
 
   const list = products.filter((p) => p.name.toLowerCase().includes(query.toLowerCase()));
@@ -248,7 +326,7 @@ function Productos() {
     <div>
       <div className="flex items-center justify-between mb-5">
         <h1 className="font-display text-xl font-semibold">PRODUCTOS</h1>
-        <button className="flex items-center gap-1.5 text-xs bg-[#f2f2f0] text-black font-semibold px-3 py-2 rounded-lg opacity-60 cursor-not-allowed" title="Crear producto: pendiente de formulario completo">
+        <button onClick={openCreate} className="flex items-center gap-1.5 text-xs bg-[#f2f2f0] text-black font-semibold px-3 py-2 rounded-lg">
           <Plus size={14} /> Nuevo producto
         </button>
       </div>
@@ -256,13 +334,85 @@ function Productos() {
         <Search size={14} className="text-white/40" />
         <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Buscar producto..." className="bg-transparent outline-none text-sm w-full" />
       </div>
+
+      {showForm && (
+        <div className="fixed inset-0 bg-black/70 z-50 flex items-end md:items-center justify-center overflow-y-auto py-6" onClick={() => setShowForm(false)}>
+          <form onSubmit={submit} onClick={(e) => e.stopPropagation()} className="bg-[#0d0d0d] border border-white/10 rounded-t-2xl md:rounded-2xl w-full md:max-w-lg p-5 max-h-full overflow-y-auto">
+            <p className="font-display text-base font-semibold mb-4">NUEVO PRODUCTO</p>
+            <div className="space-y-3">
+              <input required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Nombre del producto" className="w-full bg-black/40 border border-white/10 rounded-lg px-3 py-2 text-sm outline-none" />
+              <textarea value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} placeholder="Descripción" rows={2} className="w-full bg-black/40 border border-white/10 rounded-lg px-3 py-2 text-sm outline-none resize-none" />
+
+              <select value={form.categoryId} onChange={(e) => setForm({ ...form, categoryId: e.target.value })} className="w-full bg-black/40 border border-white/10 rounded-lg px-3 py-2 text-sm outline-none">
+                <option value="">Sin categoría</option>
+                {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </select>
+
+              <div className="grid grid-cols-2 gap-2">
+                <input required type="number" min="0" value={form.price} onChange={(e) => setForm({ ...form, price: e.target.value })} placeholder="Precio" className="w-full bg-black/40 border border-white/10 rounded-lg px-3 py-2 text-sm outline-none" />
+                <input type="number" min="0" value={form.oldPrice} onChange={(e) => setForm({ ...form, oldPrice: e.target.value })} placeholder="Precio anterior (opcional)" className="w-full bg-black/40 border border-white/10 rounded-lg px-3 py-2 text-sm outline-none" />
+              </div>
+
+              <input value={form.skuBase} onChange={(e) => setForm({ ...form, skuBase: e.target.value })} placeholder="SKU base (opcional)" className="w-full bg-black/40 border border-white/10 rounded-lg px-3 py-2 text-sm outline-none" />
+
+              <div className="flex gap-4">
+                <label className="flex items-center gap-2 text-xs text-white/70">
+                  <input type="checkbox" checked={form.featured} onChange={(e) => setForm({ ...form, featured: e.target.checked })} /> Destacado
+                </label>
+                <label className="flex items-center gap-2 text-xs text-white/70">
+                  <input type="checkbox" checked={form.isNew} onChange={(e) => setForm({ ...form, isNew: e.target.checked })} /> Nuevo
+                </label>
+              </div>
+
+              <div>
+                {form.imageUrl && <img src={form.imageUrl} alt="Vista previa" className="w-full h-32 object-cover rounded-lg border border-white/10 mb-2" />}
+                <label className="inline-flex items-center gap-2 text-xs bg-black/40 border border-white/10 rounded-lg px-3 py-2 cursor-pointer hover:border-[#ff2340]/40 w-fit">
+                  <ImageIcon size={14} />
+                  {uploading ? "Subiendo…" : "Subir foto"}
+                  <input type="file" accept="image/*" className="hidden" onChange={handleImageUpload} disabled={uploading} />
+                </label>
+              </div>
+
+              <div>
+                <p className="text-xs text-white/40 mb-1.5">Colores (se crean las variantes automáticamente)</p>
+                <div className="flex gap-2 flex-wrap">
+                  {colors.map((c) => (
+                    <button type="button" key={c.id} onClick={() => setForm((f) => ({ ...f, colorIds: toggleIn(f.colorIds, c.id) }))} className={`px-2.5 py-1 rounded-full text-xs border ${form.colorIds.includes(c.id) ? "border-[#ff2340] text-[#ff2340]" : "border-white/15 text-white/60"}`}>
+                      {c.name}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <p className="text-xs text-white/40 mb-1.5">Tallas</p>
+                <div className="flex gap-2 flex-wrap">
+                  {sizes.map((s) => (
+                    <button type="button" key={s.id} onClick={() => setForm((f) => ({ ...f, sizeIds: toggleIn(f.sizeIds, s.id) }))} className={`px-2.5 py-1 rounded-full text-xs border ${form.sizeIds.includes(s.id) ? "border-[#ff2340] text-[#ff2340]" : "border-white/15 text-white/60"}`}>
+                      {s.name}
+                    </button>
+                  ))}
+                </div>
+                <p className="text-[10px] text-white/30 mt-1.5">Las variantes se crean con stock en 0 — cárgalo después desde Movimientos.</p>
+              </div>
+
+              {error && <p className="text-[#ff2340] text-xs">{error}</p>}
+              <div className="flex gap-2">
+                <button type="button" onClick={() => setShowForm(false)} className="flex-1 py-2.5 rounded-lg border border-white/10 text-white/60 text-sm font-semibold">Cancelar</button>
+                <button type="submit" disabled={saving} className="flex-1 py-2.5 rounded-lg bg-[#f2f2f0] text-black text-sm font-semibold disabled:opacity-50">{saving ? "Creando…" : "Crear producto"}</button>
+              </div>
+            </div>
+          </form>
+        </div>
+      )}
+
       {loading ? <p className="text-white/40 text-sm">Cargando…</p> : (
         <div className="overflow-x-auto">
-          <table className="w-full text-sm min-w-[560px]">
+          <table className="w-full text-sm min-w-[600px]">
             <thead>
               <tr className="text-left text-[10px] text-white/40 tracking-widest border-b border-white/10">
                 <th className="py-2 font-normal">PRODUCTO</th><th className="font-normal">SKU</th><th className="font-normal">CATEGORÍA</th>
-                <th className="font-normal">PRECIO</th><th className="font-normal">DESTACADO</th><th className="font-normal">ESTADO</th>
+                <th className="font-normal">PRECIO</th><th className="font-normal">DESTACADO</th><th className="font-normal">ESTADO</th><th></th>
               </tr>
             </thead>
             <tbody>
@@ -278,8 +428,10 @@ function Productos() {
                       {p.active ? "ACTIVO" : "OCULTO"}
                     </button>
                   </td>
+                  <td className="text-right"><button onClick={() => remove(p.id)} className="text-white/40 hover:text-[#ff2340] p-1"><Trash2 size={14} /></button></td>
                 </tr>
               ))}
+              {list.length === 0 && <tr><td colSpan={7} className="text-white/40 text-sm py-4">No hay productos todavía.</td></tr>}
             </tbody>
           </table>
         </div>

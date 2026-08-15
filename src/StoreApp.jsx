@@ -26,6 +26,12 @@ export default function StoreApp() {
   const [logoTaps, setLogoTaps] = useState(0);
   const [checkoutError, setCheckoutError] = useState("");
   const tapTimer = useRef(null);
+  const gridRef = useRef(null);
+
+  function scrollToGrid() {
+    setView("home");
+    setTimeout(() => gridRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
+  }
 
   useEffect(() => {
     let alive = true;
@@ -175,7 +181,7 @@ export default function StoreApp() {
                 <span className="text-[#cda45e]">{brand.slogan?.split(" ").slice(2).join(" ").toUpperCase()}</span>
               </p>
               <div className="flex gap-2 mt-4">
-                <button className="px-4 py-2 rounded-full bg-[#f2f2f0] text-black text-xs font-semibold">VER COLECCIÓN</button>
+                <button onClick={scrollToGrid} className="px-4 py-2 rounded-full bg-[#f2f2f0] text-black text-xs font-semibold">VER COLECCIÓN</button>
                 <button onClick={handleCheckout} className="px-4 py-2 rounded-full border border-[#ff2340] text-[#ff2340] text-xs font-semibold glow-red flex items-center gap-1">
                   <MessageCircle size={13} /> WHATSAPP
                 </button>
@@ -192,7 +198,24 @@ export default function StoreApp() {
                   </div>
                   <p className="font-display text-base font-semibold text-[#f2f2f0]">{p.title}</p>
                   <p className="text-xs text-white/50 mt-1">{p.description}</p>
-                  {p.cta_label && <button className="text-xs text-[#cda45e] mt-2 underline underline-offset-2">{p.cta_label}</button>}
+                  {p.cta_label && (
+                    <button
+                      onClick={() => {
+                        if (p.cta_product_id) {
+                          const prod = products.find((x) => x.id === p.cta_product_id);
+                          if (prod) return openProduct(prod);
+                        }
+                        if (p.cta_category_id) {
+                          const cat = categories.find((x) => x.id === p.cta_category_id);
+                          if (cat) setActiveCategory(cat.name);
+                        }
+                        scrollToGrid();
+                      }}
+                      className="text-xs text-[#cda45e] mt-2 underline underline-offset-2"
+                    >
+                      {p.cta_label}
+                    </button>
+                  )}
                 </div>
               ))}
             </section>
@@ -212,7 +235,7 @@ export default function StoreApp() {
             ))}
           </section>
 
-          <section className="mt-5 px-4 grid grid-cols-2 gap-3">
+          <section ref={gridRef} className="mt-5 px-4 grid grid-cols-2 gap-3">
             {filtered.map((p) => {
               const status = statusVisual(p.overallStatus);
               const tag = p.isNew ? "NUEVO" : p.onPromotion ? "OFERTA" : p.featured ? "DESTACADO" : null;
@@ -241,6 +264,41 @@ export default function StoreApp() {
             })}
             {filtered.length === 0 && <p className="col-span-2 text-center text-white/40 text-sm py-10">No hay productos en esta categoría todavía.</p>}
           </section>
+        </main>
+      )}
+
+      {view === "categories" && (
+        <main className="px-4 pt-4 pb-24">
+          <div className="flex items-center gap-2 mb-4">
+            <button onClick={() => setView("home")} className="p-1"><ChevronLeft size={20} /></button>
+            <p className="font-display text-lg font-semibold">CATEGORÍAS</p>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            {categories.map((c) => {
+              const cover = products.find((p) => p.category === c.name)?.img;
+              return (
+                <button
+                  key={c.id}
+                  onClick={() => {
+                    setActiveCategory(c.name);
+                    scrollToGrid();
+                  }}
+                  className="text-left bg-[#0d0d0d] border border-white/5 rounded-xl overflow-hidden hover:border-[#ff2340]/40 hover:glow-red transition-all"
+                >
+                  <div className="relative aspect-[4/3]">
+                    {cover ? (
+                      <img src={cover} alt={c.name} className="w-full h-full object-cover" loading="lazy" decoding="async" />
+                    ) : (
+                      <div className="w-full h-full bg-black/40" />
+                    )}
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/80 to-transparent" />
+                    <p className="absolute bottom-2 left-3 font-display text-sm font-semibold">{c.name}</p>
+                  </div>
+                </button>
+              );
+            })}
+            {categories.length === 0 && <p className="col-span-2 text-center text-white/40 text-sm py-10">No hay categorías todavía.</p>}
+          </div>
         </main>
       )}
 
@@ -322,7 +380,7 @@ export default function StoreApp() {
       {view !== "product" && (
         <nav className="fixed bottom-0 left-0 right-0 bg-[#050505] border-t border-white/10 flex items-center justify-around py-2.5 z-30">
           <NavBtn icon={<Home size={19} />} label="Inicio" active={view === "home"} onClick={() => setView("home")} />
-          <NavBtn icon={<Grid3x3 size={19} />} label="Categorías" active={false} onClick={() => setView("home")} />
+          <NavBtn icon={<Grid3x3 size={19} />} label="Categorías" active={view === "categories"} onClick={() => setView("categories")} />
           <NavBtn icon={<Search size={19} />} label="Buscar" active={view === "search"} onClick={() => setView("search")} />
           <NavBtn icon={<ShoppingBag size={19} />} label="Carrito" active={view === "cart"} badge={cartCount} onClick={() => setView("cart")} />
         </nav>
