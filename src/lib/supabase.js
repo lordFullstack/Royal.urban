@@ -146,12 +146,19 @@ export function buildWhatsappMessage(order, cart) {
   return msg;
 }
 
-export async function openWhatsappCheckout(cart, customer = {}) {
+export async function openWhatsappCheckout(cart, customer = {}, { targetWindow } = {}) {
   const settings = await fetchSettings();
   const number = settings.whatsapp?.number || "573000000000";
   const { order, message } = await createOrderFromCart(cart, customer);
   const url = `https://wa.me/${number}?text=${encodeURIComponent(message)}`;
-  window.open(url, "_blank");
+  // Si ya se abrió una ventana en blanco de forma síncrona (dentro del gesto de clic),
+  // solo redirigimos esa ventana. Así evitamos que el navegador bloquee el pop-up
+  // por abrirse después de un await.
+  if (targetWindow && !targetWindow.closed) {
+    targetWindow.location.href = url;
+  } else {
+    window.open(url, "_blank");
+  }
   return order;
 }
 
