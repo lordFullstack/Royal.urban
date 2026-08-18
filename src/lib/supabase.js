@@ -72,6 +72,7 @@ export async function fetchCatalog() {
       oldPrice: p.old_price ? Number(p.old_price) : null,
       category: p.category_name,
       img: p.image_url,
+      inCollection: p.in_collection,
       featured: p.featured,
       isNew: p.is_new,
       onPromotion: p.on_promotion,
@@ -146,19 +147,12 @@ export function buildWhatsappMessage(order, cart) {
   return msg;
 }
 
-export async function openWhatsappCheckout(cart, customer = {}, { targetWindow } = {}) {
+export async function openWhatsappCheckout(cart, customer = {}) {
   const settings = await fetchSettings();
   const number = settings.whatsapp?.number || "573000000000";
   const { order, message } = await createOrderFromCart(cart, customer);
   const url = `https://wa.me/${number}?text=${encodeURIComponent(message)}`;
-  // Si ya se abrió una ventana en blanco de forma síncrona (dentro del gesto de clic),
-  // solo redirigimos esa ventana. Así evitamos que el navegador bloquee el pop-up
-  // por abrirse después de un await.
-  if (targetWindow && !targetWindow.closed) {
-    targetWindow.location.href = url;
-  } else {
-    window.open(url, "_blank");
-  }
+  window.open(url, "_blank");
   return order;
 }
 
@@ -209,6 +203,11 @@ export async function toggleProductActive(id, active) {
   if (error) throw error;
 }
 
+export async function toggleProductCollection(id, inCollection) {
+  const { error } = await supabase.from("products").update({ in_collection: inCollection }).eq("id", id);
+  if (error) throw error;
+}
+
 export async function fetchColors() {
   const { data, error } = await supabase.from("colors").select("*").order("name");
   if (error) throw error;
@@ -233,7 +232,7 @@ function slugifyProduct(text) {
 // la matriz de variantes (con stock en 0 — el stock real se carga después desde
 // Movimientos, tal como pide la regla de negocio: todo cambio de stock pasa por el kardex).
 export async function createProductWithVariants({
-  name, description, categoryId, price, oldPrice, skuBase, featured, isNew, imageUrl,
+  name, description, categoryId, price, oldPrice, skuBase, featured, isNew, inCollection, imageUrl,
   colorIds = [], sizeIds = [], minStock = 3,
 }) {
   const slug = slugifyProduct(name);
@@ -244,7 +243,7 @@ export async function createProductWithVariants({
       category_id: categoryId || null,
       price, old_price: oldPrice || null,
       sku_base: skuBase || null,
-      featured: !!featured, is_new: !!isNew,
+      featured: !!featured, is_new: !!isNew, in_collection: !!inCollection,
       image_url: imageUrl || null,
       active: true,
     })
