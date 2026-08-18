@@ -552,32 +552,48 @@ function Categorias() {
 
 function Promociones() {
   const [promos, setPromos] = useState([]);
+  const [categories, setCategories] = useState([]);
+  const [products, setProducts] = useState([]);
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState(null); // null = crear, objeto = editar
-  const [form, setForm] = useState({ title: "", description: "", image_url: "", cta_label: "" });
+  const emptyForm = { title: "", description: "", image_url: "", cta_label: "", linkType: "none", cta_category_id: "", cta_product_id: "" };
+  const [form, setForm] = useState(emptyForm);
   const [error, setError] = useState("");
   const [uploading, setUploading] = useState(false);
 
   function reload() { fetchAdminPromotions().then(setPromos); }
-  useEffect(reload, []);
+  useEffect(() => {
+    reload();
+    fetchAdminCategories().then(setCategories);
+    fetchAdminProducts().then(setProducts);
+  }, []);
 
   function openCreate() {
     setEditing(null);
-    setForm({ title: "", description: "", image_url: "", cta_label: "" });
+    setForm(emptyForm);
     setShowForm(true);
   }
   function openEdit(p) {
     setEditing(p);
-    setForm({ title: p.title, description: p.description || "", image_url: p.image_url || "", cta_label: p.cta_label || "" });
+    setForm({
+      title: p.title, description: p.description || "", image_url: p.image_url || "", cta_label: p.cta_label || "",
+      linkType: p.cta_product_id ? "product" : p.cta_category_id ? "category" : "none",
+      cta_category_id: p.cta_category_id || "", cta_product_id: p.cta_product_id || "",
+    });
     setShowForm(true);
   }
 
   async function submit(e) {
     e.preventDefault();
     setError("");
+    const payload = {
+      title: form.title, description: form.description, image_url: form.image_url, cta_label: form.cta_label,
+      cta_category_id: form.linkType === "category" ? form.cta_category_id : null,
+      cta_product_id: form.linkType === "product" ? form.cta_product_id : null,
+    };
     try {
-      if (editing) await updatePromotion(editing.id, form);
-      else await createPromotion(form);
+      if (editing) await updatePromotion(editing.id, payload);
+      else await createPromotion(payload);
       setShowForm(false);
       reload();
     } catch (err) {
@@ -641,6 +657,33 @@ function Promociones() {
               </div>
 
               <input value={form.cta_label} onChange={(e) => setForm({ ...form, cta_label: e.target.value })} placeholder="Texto del botón (ej. Ver colección)" className="w-full bg-black/40 border border-white/10 rounded-lg px-3 py-2 text-sm outline-none" />
+
+              <div>
+                <p className="text-xs text-white/40 mb-1.5">Al tocar el botón, llevar a:</p>
+                <div className="flex gap-2 mb-2">
+                  {[
+                    { id: "none", label: "Catálogo general" },
+                    { id: "category", label: "Categoría" },
+                    { id: "product", label: "Producto" },
+                  ].map((opt) => (
+                    <button key={opt.id} type="button" onClick={() => setForm({ ...form, linkType: opt.id })} className={`px-2.5 py-1 rounded-full text-[11px] border ${form.linkType === opt.id ? "border-[#ff2340] text-[#ff2340]" : "border-white/15 text-white/60"}`}>
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+                {form.linkType === "category" && (
+                  <select value={form.cta_category_id} onChange={(e) => setForm({ ...form, cta_category_id: e.target.value })} className="w-full bg-black/40 border border-white/10 rounded-lg px-3 py-2 text-sm outline-none">
+                    <option value="">Selecciona categoría…</option>
+                    {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  </select>
+                )}
+                {form.linkType === "product" && (
+                  <select value={form.cta_product_id} onChange={(e) => setForm({ ...form, cta_product_id: e.target.value })} className="w-full bg-black/40 border border-white/10 rounded-lg px-3 py-2 text-sm outline-none">
+                    <option value="">Selecciona producto…</option>
+                    {products.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                  </select>
+                )}
+              </div>
               {error && <p className="text-[#ff2340] text-xs">{error}</p>}
               <button type="submit" className="w-full py-2.5 rounded-lg bg-[#f2f2f0] text-black text-sm font-semibold">{editing ? "Guardar cambios" : "Crear tarjeta"}</button>
             </div>
