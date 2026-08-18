@@ -32,6 +32,9 @@ export default function StoreApp() {
     setView("home");
     setTimeout(() => gridRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
   }
+  function openCollection() {
+    setView("collection");
+  }
 
   useEffect(() => {
     let alive = true;
@@ -104,8 +107,19 @@ export default function StoreApp() {
     }
   }
 
+  async function openGeneralWhatsapp() {
+    try {
+      const s = await fetchSettings();
+      const number = s.whatsapp?.number || "573000000000";
+      const message = s.whatsapp?.default_message || `Hola, quiero más información de ${s.brand?.name || "ROYAL URBAN"}.`;
+      window.open(`https://wa.me/${number}?text=${encodeURIComponent(message)}`, "_blank");
+    } catch {
+      window.open("https://wa.me/573000000000", "_blank");
+    }
+  }
+
   async function handleCheckout() {
-    if (cart.length === 0) return;
+    if (cart.length === 0) return openGeneralWhatsapp();
     setCheckoutError("");
     try {
       await openWhatsappCheckout(cart, {});
@@ -181,7 +195,7 @@ export default function StoreApp() {
                 <span className="text-[#cda45e]">{brand.slogan?.split(" ").slice(2).join(" ").toUpperCase()}</span>
               </p>
               <div className="flex gap-2 mt-4">
-                <button onClick={scrollToGrid} className="px-4 py-2 rounded-full bg-[#f2f2f0] text-black text-xs font-semibold">VER COLECCIÓN</button>
+                <button onClick={openCollection} className="px-4 py-2 rounded-full bg-[#f2f2f0] text-black text-xs font-semibold">VER COLECCIÓN</button>
                 <button onClick={handleCheckout} className="px-4 py-2 rounded-full border border-[#ff2340] text-[#ff2340] text-xs font-semibold glow-red flex items-center gap-1">
                   <MessageCircle size={13} /> WHATSAPP
                 </button>
@@ -236,34 +250,28 @@ export default function StoreApp() {
           </section>
 
           <section ref={gridRef} className="mt-5 px-4 grid grid-cols-2 gap-3">
-            {filtered.map((p) => {
-              const status = statusVisual(p.overallStatus);
-              const tag = p.isNew ? "NUEVO" : p.onPromotion ? "OFERTA" : p.featured ? "DESTACADO" : null;
-              return (
-                <button
-                  key={p.id}
-                  onClick={() => openProduct(p)}
-                  className="text-left bg-[#0d0d0d] border border-[#ff2340]/10 rounded-xl overflow-hidden hover:border-[#ff2340]/40 hover:glow-red transition-all"
-                >
-                  <div className="relative aspect-[3/4]">
-                    <img src={p.img} alt={p.name} className="w-full h-full object-cover" loading="lazy" decoding="async" />
-                    {tag && (
-                      <span className="absolute top-2 left-2 text-[9px] font-bold px-2 py-0.5 rounded bg-black/70 text-[#cda45e] border border-[#cda45e]/30">{tag}</span>
-                    )}
-                  </div>
-                  <div className="p-2.5">
-                    <p className="text-xs font-medium truncate">{p.name}</p>
-                    <div className="flex items-baseline gap-1.5 mt-1">
-                      <span className="text-[#cda45e] font-display text-sm font-semibold">{money(p.price)}</span>
-                      {p.oldPrice && <span className="text-[10px] text-white/30 line-through">{money(p.oldPrice)}</span>}
-                    </div>
-                    <span className={`inline-block mt-1.5 text-[9px] font-semibold border rounded px-1.5 py-0.5 ${status.cls}`}>{status.label}</span>
-                  </div>
-                </button>
-              );
-            })}
+            {filtered.map((p) => (
+              <ProductCard key={p.id} product={p} onClick={() => openProduct(p)} />
+            ))}
             {filtered.length === 0 && <p className="col-span-2 text-center text-white/40 text-sm py-10">No hay productos en esta categoría todavía.</p>}
           </section>
+        </main>
+      )}
+
+      {view === "collection" && (
+        <main className="px-4 pt-4 pb-24">
+          <div className="flex items-center gap-2 mb-4">
+            <button onClick={() => setView("home")} className="p-1"><ChevronLeft size={20} /></button>
+            <p className="font-display text-lg font-semibold">COLECCIÓN</p>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            {products.filter((p) => p.inCollection).map((p) => (
+              <ProductCard key={p.id} product={p} onClick={() => openProduct(p)} />
+            ))}
+            {products.filter((p) => p.inCollection).length === 0 && (
+              <p className="col-span-2 text-center text-white/40 text-sm py-10">Todavía no hay prendas seleccionadas para la colección.</p>
+            )}
+          </div>
         </main>
       )}
 
@@ -386,6 +394,30 @@ export default function StoreApp() {
         </nav>
       )}
     </div>
+  );
+}
+
+function ProductCard({ product: p, onClick }) {
+  const status = statusVisual(p.overallStatus);
+  const tag = p.isNew ? "NUEVO" : p.onPromotion ? "OFERTA" : p.featured ? "DESTACADO" : null;
+  return (
+    <button
+      onClick={onClick}
+      className="text-left bg-[#0d0d0d] border border-[#ff2340]/10 rounded-xl overflow-hidden hover:border-[#ff2340]/40 hover:glow-red transition-all"
+    >
+      <div className="relative aspect-[3/4]">
+        <img src={p.img} alt={p.name} className="w-full h-full object-cover" loading="lazy" decoding="async" />
+        {tag && <span className="absolute top-2 left-2 text-[9px] font-bold px-2 py-0.5 rounded bg-black/70 text-[#cda45e] border border-[#cda45e]/30">{tag}</span>}
+      </div>
+      <div className="p-2.5">
+        <p className="text-xs font-medium truncate">{p.name}</p>
+        <div className="flex items-baseline gap-1.5 mt-1">
+          <span className="text-[#cda45e] font-display text-sm font-semibold">{money(p.price)}</span>
+          {p.oldPrice && <span className="text-[10px] text-white/30 line-through">{money(p.oldPrice)}</span>}
+        </div>
+        <span className={`inline-block mt-1.5 text-[9px] font-semibold border rounded px-1.5 py-0.5 ${status.cls}`}>{status.label}</span>
+      </div>
+    </button>
   );
 }
 

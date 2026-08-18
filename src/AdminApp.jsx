@@ -5,7 +5,7 @@ import {
 } from "lucide-react";
 import {
   signIn, signOut, getCurrentSession,
-  fetchAdminProducts, toggleProductActive, createProductWithVariants, deleteProduct, fetchColors, fetchSizes,
+  fetchAdminProducts, toggleProductActive, toggleProductCollection, createProductWithVariants, deleteProduct, fetchColors, fetchSizes,
   fetchAdminCategories, toggleCategoryVisible, createCategory, updateCategoryName, deleteCategory,
   fetchAdminPromotions, createPromotion, updatePromotion, togglePromotionActive, deletePromotion,
   fetchInventory, fetchMovements, registerMovement,
@@ -241,7 +241,7 @@ function Productos() {
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState("");
-  const emptyForm = { name: "", description: "", categoryId: "", price: "", oldPrice: "", skuBase: "", featured: false, isNew: false, imageUrl: "", colorIds: [], sizeIds: [] };
+  const emptyForm = { name: "", description: "", categoryId: "", price: "", oldPrice: "", skuBase: "", featured: false, isNew: false, inCollection: false, imageUrl: "", colorIds: [], sizeIds: [] };
   const [form, setForm] = useState(emptyForm);
 
   function reload() { fetchAdminProducts().then(setProducts).finally(() => setLoading(false)); }
@@ -255,6 +255,11 @@ function Productos() {
   async function toggle(id, active) {
     await toggleProductActive(id, !active);
     setProducts((prev) => prev.map((p) => (p.id === id ? { ...p, active: !active } : p)));
+  }
+
+  async function toggleCollection(id, inCollection) {
+    await toggleProductCollection(id, !inCollection);
+    setProducts((prev) => prev.map((p) => (p.id === id ? { ...p, in_collection: !inCollection } : p)));
   }
 
   async function remove(id) {
@@ -307,6 +312,7 @@ function Productos() {
         skuBase: form.skuBase,
         featured: form.featured,
         isNew: form.isNew,
+        inCollection: form.inCollection,
         imageUrl: form.imageUrl,
         colorIds: form.colorIds,
         sizeIds: form.sizeIds,
@@ -362,6 +368,9 @@ function Productos() {
                 <label className="flex items-center gap-2 text-xs text-white/70">
                   <input type="checkbox" checked={form.isNew} onChange={(e) => setForm({ ...form, isNew: e.target.checked })} /> Nuevo
                 </label>
+                <label className="flex items-center gap-2 text-xs text-white/70">
+                  <input type="checkbox" checked={form.inCollection} onChange={(e) => setForm({ ...form, inCollection: e.target.checked })} /> En colección
+                </label>
               </div>
 
               <div>
@@ -412,7 +421,7 @@ function Productos() {
             <thead>
               <tr className="text-left text-[10px] text-white/40 tracking-widest border-b border-white/10">
                 <th className="py-2 font-normal">PRODUCTO</th><th className="font-normal">SKU</th><th className="font-normal">CATEGORÍA</th>
-                <th className="font-normal">PRECIO</th><th className="font-normal">DESTACADO</th><th className="font-normal">ESTADO</th><th></th>
+                <th className="font-normal">PRECIO</th><th className="font-normal">DESTACADO</th><th className="font-normal">COLECCIÓN</th><th className="font-normal">ESTADO</th><th></th>
               </tr>
             </thead>
             <tbody>
@@ -423,6 +432,11 @@ function Productos() {
                   <td className="text-white/50">{p.categories?.name}</td>
                   <td className="text-[#cda45e] font-display">{money(p.price)}</td>
                   <td>{p.featured ? <span className="text-[#cda45e] text-xs">★</span> : <span className="text-white/20 text-xs">—</span>}</td>
+                  <td>
+                    <button onClick={() => toggleCollection(p.id, p.in_collection)} className={`text-[10px] font-semibold border rounded-full px-2 py-0.5 ${p.in_collection ? "text-[#cda45e] border-[#cda45e]/30" : "text-white/30 border-white/10"}`}>
+                      {p.in_collection ? "SÍ" : "NO"}
+                    </button>
+                  </td>
                   <td>
                     <button onClick={() => toggle(p.id, p.active)} className={`text-[10px] font-semibold border rounded-full px-2 py-0.5 ${p.active ? "text-[#cda45e] border-[#cda45e]/30" : "text-white/30 border-white/10"}`}>
                       {p.active ? "ACTIVO" : "OCULTO"}
