@@ -316,17 +316,29 @@ export async function fetchAdminPromotions() {
   return data;
 }
 
-export async function createPromotion({ title, description, image_url, cta_label }) {
+export async function createPromotion({ title, description, image_url, cta_label, cta_category_id, cta_product_id }) {
   const { data: maxRow } = await supabase.from("promotions").select("position").order("position", { ascending: false }).limit(1).single();
   const nextPosition = (maxRow?.position ?? 0) + 1;
   const { error } = await supabase
     .from("promotions")
-    .insert({ title, description, image_url, cta_label, active: true, position: nextPosition });
+    .insert({
+      title, description, image_url, cta_label,
+      cta_category_id: cta_category_id || null,
+      cta_product_id: cta_product_id || null,
+      active: true, position: nextPosition,
+    });
   if (error) throw error;
 }
 
-export async function updatePromotion(id, { title, description, image_url, cta_label }) {
-  const { error } = await supabase.from("promotions").update({ title, description, image_url, cta_label }).eq("id", id);
+export async function updatePromotion(id, { title, description, image_url, cta_label, cta_category_id, cta_product_id }) {
+  const { error } = await supabase
+    .from("promotions")
+    .update({
+      title, description, image_url, cta_label,
+      cta_category_id: cta_category_id || null,
+      cta_product_id: cta_product_id || null,
+    })
+    .eq("id", id);
   if (error) throw error;
 }
 
