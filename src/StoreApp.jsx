@@ -31,7 +31,7 @@ function writeBrandCache(brand) {
 }
 
 // Estado de disponibilidad → tono visual del sistema
-const STATUS_TONE = { disponible: "success", ultimas_unidades: "warning", agotado: "neutral" };
+const STATUS_TONE = { disponible: "success", ultimas_unidades: "warning", por_encargo: "warning", agotado: "neutral" };
 
 export default function StoreApp() {
   const [view, setView] = useState("home");
@@ -135,7 +135,7 @@ export default function StoreApp() {
       if (existing) {
         return prev.map((c) => (c.key === key ? { ...c, qty: c.qty + qty } : c));
       }
-      return [...prev, { key, variantId: variant?.id, id: product.id, name: product.name, color, size, qty, price: product.price, img: product.img }];
+      return [...prev, { key, variantId: variant?.id, id: product.id, name: product.name, color, size, qty, price: product.price, img: product.img, onRequest: variant?.status === "por_encargo" }];
     });
     // Feedback sin sacar al usuario del producto
     setToast({
@@ -684,6 +684,7 @@ function discountPct(price, oldPrice) {
 function ProductCard({ product: p, onClick }) {
   const status = statusVisual(p.overallStatus);
   const soldOut = p.overallStatus === "agotado";
+  const onRequest = p.overallStatus === "por_encargo";
   const tag = p.isNew ? "Nuevo" : p.onPromotion ? "Oferta" : p.featured ? "Destacado" : null;
   const off = discountPct(p.price, p.oldPrice);
   return (
@@ -697,6 +698,9 @@ function ProductCard({ product: p, onClick }) {
         {soldOut && (
           <span className="absolute bottom-2 left-2 badge-neutral bg-black/70 backdrop-blur-md">Agotado</span>
         )}
+        {onRequest && (
+          <span className="absolute bottom-2 left-2 badge-neutral bg-black/70 backdrop-blur-md">Por encargo</span>
+        )}
       </div>
       <div className="pt-2.5 px-0.5">
         <p className="text-[13px] font-medium text-ink/90 line-clamp-1">{p.name}</p>
@@ -704,7 +708,7 @@ function ProductCard({ product: p, onClick }) {
           <span className="price text-[15px]">{money(p.price)}</span>
           {p.oldPrice && <span className="text-[11px] text-faint line-through tabular-nums">{money(p.oldPrice)}</span>}
         </div>
-        {!soldOut && (
+        {!soldOut && !onRequest && (
           <span className="mt-1 flex items-center gap-1.5 text-[11px] text-muted">
             <span className={cx("w-1.5 h-1.5 rounded-full", p.overallStatus === "disponible" ? "bg-success" : "bg-warning")} />
             {status.label.charAt(0) + status.label.slice(1).toLowerCase()}
@@ -872,7 +876,7 @@ function ProductDetail({ product, onBack, onAdd, onWhatsapp, whatsappBusy, cartC
       <div className="fixed bottom-0 left-0 right-0 z-30 bg-bg/90 backdrop-blur-xl border-t border-line/60 pb-safe">
         <div className="mx-auto max-w-6xl px-4 md:px-6 py-3 flex gap-2 md:justify-end">
           <Button size="lg" disabled={!isAvailable} onClick={handleAdd} icon={<ShoppingBag size={18} />} className="flex-1 md:flex-none md:min-w-[280px]">
-            {isAvailable ? (qty > 1 ? `Agregar ${qty} · ${money(product.price * qty)}` : "Agregar al carrito") : "Agotado"}
+            {!isAvailable ? "Agotado" : variant.status === "por_encargo" ? (qty > 1 ? `Encargar ${qty} · ${money(product.price * qty)}` : "Encargar") : qty > 1 ? `Agregar ${qty} · ${money(product.price * qty)}` : "Agregar al carrito"}
           </Button>
           <Button variant="whatsapp" size="lg" onClick={onWhatsapp} loading={whatsappBusy} aria-label="Consultar por WhatsApp" className="px-0 w-[52px] shrink-0" icon={<MessageCircle size={20} />} />
         </div>

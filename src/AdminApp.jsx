@@ -6,7 +6,7 @@ import {
 } from "lucide-react";
 import {
   signIn, signOut, getCurrentSession,
-  fetchAdminProducts, toggleProductActive, toggleProductCollection, createProductWithVariants, deleteProduct, fetchColors, fetchSizes,
+  fetchAdminProducts, toggleProductActive, toggleProductCollection, createProductWithVariants, createColor, deleteProduct, fetchColors, fetchSizes,
   fetchAdminCategories, toggleCategoryVisible, createCategory, updateCategoryName, deleteCategory,
   fetchAdminPromotions, createPromotion, updatePromotion, togglePromotionActive, deletePromotion,
   fetchInventory, fetchMovements, registerMovement,
@@ -23,9 +23,8 @@ import {
    La lógica de datos (Supabase), roles y permisos no cambian.
 --------------------------------------------------------- */
 
-function stockBadge(stock, min) {
-  if (stock <= 0) return { label: "Agotado", tone: "neutral", key: "agotado" };
-  if (stock <= min) return { label: "Stock bajo", tone: "red", key: "bajo" };
+function stockBadge(stock) {
+  if (stock <= 0) return { label: "Por encargo", tone: "gold", key: "encargo" };
   return { label: "Disponible", tone: "success", key: "ok" };
 }
 
@@ -469,7 +468,6 @@ function Dashboard({ onNavigate, sections }) {
         orders,
         inv,
         ordersTotal: orders?.length ?? null,
-        lowStock: inv ? inv.filter((x) => x.stock > 0 && x.stock <= x.min_stock) : [],
         outOfStock: inv ? inv.filter((x) => x.stock <= 0) : [],
         pending,
       });
@@ -494,7 +492,7 @@ function Dashboard({ onNavigate, sections }) {
     );
   }
 
-  const critical = [...stats.outOfStock, ...stats.lowStock];
+  const critical = stats.outOfStock;
   const attention = stats.pending.length + critical.length;
   const canOrders = sections.includes("pedidos") && stats.orders;
   const canInv = sections.includes("inventario") && stats.inv;
@@ -519,8 +517,7 @@ function Dashboard({ onNavigate, sections }) {
         )}
         {stats.inv && (
           <>
-            <Kpi label="Stock bajo" value={stats.lowStock.length} context="Variantes en o bajo el mínimo" icon={<AlertTriangle size={16} />} tone={stats.lowStock.length ? "warning" : "neutral"} onClick={canInv ? () => onNavigate("inventario") : null} />
-            <Kpi label="Agotados" value={stats.outOfStock.length} context="Variantes sin unidades" icon={<PackageX size={16} />} tone={stats.outOfStock.length ? "red" : "neutral"} onClick={canInv ? () => onNavigate("inventario") : null} />
+            <Kpi label="Por encargo" value={stats.outOfStock.length} context="Variantes sin unidades" icon={<PackageX size={16} />} tone={stats.outOfStock.length ? "warning" : "neutral"} onClick={canInv ? () => onNavigate("inventario") : null} />
           </>
         )}
         {stats.orders && (
@@ -558,16 +555,16 @@ function Dashboard({ onNavigate, sections }) {
 
         {stats.inv && (
           <Panel
-            title="Stock crítico"
+            title="Por encargo"
             icon={<AlertTriangle size={15} className="text-warning" />}
             action={canInv && critical.length > 0 ? <PanelLink onClick={() => onNavigate("inventario")}>Ver inventario</PanelLink> : null}
           >
             {critical.length === 0 ? (
-              <EmptyState className="py-8" icon={<Check size={20} />} title="Inventario saludable" description="Ninguna variante está agotada o bajo el mínimo." />
+              <EmptyState className="py-8" icon={<Check size={20} />} title="Todo con stock" description="Ninguna variante está sin unidades." />
             ) : (
               <ul className="divide-y divide-line/60">
                 {critical.slice(0, 6).map((r) => {
-                  const b = stockBadge(r.stock, r.min_stock);
+                  const b = stockBadge(r.stock);
                   return (
                     <li key={r.id} className="flex items-center justify-between gap-3 py-3">
                       <div className="min-w-0">
@@ -577,7 +574,7 @@ function Dashboard({ onNavigate, sections }) {
                       <div className="flex items-center gap-3 shrink-0">
                         <Badge tone={b.tone}>{b.label}</Badge>
                         <span className="text-sm tabular-nums w-14 text-right">
-                          {r.stock}<span className="text-faint">/{r.min_stock}</span>
+                          {r.stock}
                         </span>
                       </div>
                     </li>
@@ -650,6 +647,8 @@ function Productos() {
   const [error, setError] = useState("");
   const [fieldErrors, setFieldErrors] = useState({});
   const [busyId, setBusyId] = useState(null);
+  const [newColor, setNewColor] = useState("");
+  const [addingColor, setAddingColor] = useState(false);
   const emptyForm = { name: "", description: "", categoryId: "", price: "", oldPrice: "", skuBase: "", featured: false, isNew: false, inCollection: false, imageUrl: "", colorIds: [], sizeIds: [] };
   const [form, setForm] = useState(emptyForm);
 
@@ -763,6 +762,22 @@ function Productos() {
       setError(err.message);
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function addManualColor() {
+    const name = newColor.trim();
+    if (!name || addingColor) return;
+    setAddingColor(true);
+    try {
+      const color = await createColor(name);
+      setColors((prev) => (prev.some((c) => c.id === color.id) ? prev : [...prev, color].sort((a, b) => a.name.localeCompare(b.name))));
+      setForm((f) => (f.colorIds.includes(color.id) ? f : { ...f, colorIds: [...f.colorIds, color.id] }));
+      setNewColor("");
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setAddingColor(false);
     }
   }
 
@@ -916,6 +931,18 @@ function Productos() {
                 {colors.map((c) => (
                   <OptionChip key={c.id} selected={form.colorIds.includes(c.id)} onClick={() => setForm((f) => ({ ...f, colorIds: toggleIn(f.colorIds, c.id) }))}>{c.name}</OptionChip>
                 ))}
+              </div>
+              <div className="flex gap-2 mt-2.5 max-w-sm">
+                <Input
+                  id="p-new-color"
+                  value={newColor}
+                  onChange={(e) => setNewColor(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addManualColor(); } }}
+                  placeholder="Otro color (ej. Verde militar)"
+                  aria-label="Agregar color manual"
+                  maxLength={40}
+                />
+                <Button type="button" variant="secondary" onClick={addManualColor} loading={addingColor} disabled={!newColor.trim()} icon={<Plus size={14} />}>Agregar</Button>
               </div>
             </div>
             <div>
@@ -1305,16 +1332,16 @@ function Inventario() {
   useEffect(() => { fetchInventory().then(setInv).finally(() => setLoading(false)); }, []);
 
   const counts = useMemo(() => {
-    const c = { todos: inv.length, bajo: 0, agotado: 0 };
+    const c = { todos: inv.length, encargo: 0 };
     inv.forEach((r) => {
-      const k = stockBadge(r.stock, r.min_stock).key;
+      const k = stockBadge(r.stock).key;
       if (k in c) c[k]++;
     });
     return c;
   }, [inv]);
 
   const rows = inv.filter((r) => {
-    if (filter !== "todos" && stockBadge(r.stock, r.min_stock).key !== filter) return false;
+    if (filter !== "todos" && stockBadge(r.stock).key !== filter) return false;
     if (!query) return true;
     const q = query.toLowerCase();
     return [r.products?.name, r.sku, r.colors?.name, r.sizes?.name].some((v) => (v || "").toLowerCase().includes(q));
@@ -1330,8 +1357,7 @@ function Inventario() {
           onChange={setFilter}
           options={[
             { id: "todos", label: "Todos", count: counts.todos },
-            { id: "bajo", label: "Stock bajo", count: counts.bajo },
-            { id: "agotado", label: "Agotados", count: counts.agotado },
+            { id: "encargo", label: "Por encargo", count: counts.encargo },
           ]}
         />
         <SearchBox value={query} onChange={setQuery} placeholder="Buscar producto, SKU, color…" className="sm:max-w-xs flex-1" />
@@ -1346,18 +1372,17 @@ function Inventario() {
           <div className="hidden md:block surface overflow-hidden">
             <table className="table">
               <thead>
-                <tr><th>Producto</th><th>Variante</th><th>SKU</th><th className="text-right">Stock</th><th className="text-right">Mínimo</th><th>Estado</th></tr>
+                <tr><th>Producto</th><th>Variante</th><th>SKU</th><th className="text-right">Stock</th><th>Estado</th></tr>
               </thead>
               <tbody>
                 {rows.map((r) => {
-                  const badge = stockBadge(r.stock, r.min_stock);
+                  const badge = stockBadge(r.stock);
                   return (
                     <tr key={r.id}>
                       <td className="font-medium">{r.products?.name}</td>
                       <td className="text-muted">{r.colors?.name} / {r.sizes?.name}</td>
                       <td className="text-faint text-xs">{r.sku}</td>
-                      <td className={cx("text-right font-semibold tabular-nums", badge.key === "bajo" && "text-neon", badge.key === "agotado" && "text-faint")}>{r.stock}</td>
-                      <td className="text-right text-faint tabular-nums">{r.min_stock}</td>
+                      <td className={cx("text-right font-semibold tabular-nums", badge.key === "encargo" && "text-faint")}>{r.stock}</td>
                       <td><Badge tone={badge.tone} dot>{badge.label}</Badge></td>
                     </tr>
                   );
@@ -1368,7 +1393,7 @@ function Inventario() {
 
           <ul className="md:hidden space-y-2">
             {rows.map((r) => {
-              const badge = stockBadge(r.stock, r.min_stock);
+              const badge = stockBadge(r.stock);
               return (
                 <li key={r.id} className="surface p-3.5 flex items-center gap-3">
                   <div className="flex-1 min-w-0">
@@ -1377,8 +1402,7 @@ function Inventario() {
                     <Badge tone={badge.tone} dot className="mt-2">{badge.label}</Badge>
                   </div>
                   <div className="text-right shrink-0">
-                    <p className={cx("text-2xl font-semibold tabular-nums leading-none", badge.key === "bajo" && "text-neon", badge.key === "agotado" && "text-faint")}>{r.stock}</p>
-                    <p className="text-[11px] text-faint mt-1">mín. {r.min_stock}</p>
+                    <p className={cx("text-2xl font-semibold tabular-nums leading-none", badge.key === "encargo" && "text-faint")}>{r.stock}</p>
                   </div>
                 </li>
               );
@@ -1511,7 +1535,7 @@ function Movimientos() {
         }
       >
         <form id="move-form" onSubmit={submit} className="space-y-4">
-          <Field label="Variante *" htmlFor="mv-variant" help={selectedVariant ? `Stock actual: ${selectedVariant.stock} · mínimo ${selectedVariant.min_stock}` : null}>
+          <Field label="Variante *" htmlFor="mv-variant" help={selectedVariant ? `Stock actual: ${selectedVariant.stock}` : null}>
             <Select id="mv-variant" required value={form.variantId} onChange={(e) => setForm({ ...form, variantId: e.target.value })}>
               <option value="">Selecciona variante…</option>
               {inv.map((v) => (

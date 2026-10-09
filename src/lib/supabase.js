@@ -13,6 +13,7 @@ export const supabase = createClient(
 const STATUS_LABEL = {
   disponible: { label: "DISPONIBLE", cls: "text-[#cda45e] border-[#cda45e]/40" },
   ultimas_unidades: { label: "ÚLTIMAS UNIDADES", cls: "text-[#ff2340] border-[#ff2340]/50" },
+  por_encargo: { label: "DISPONIBLE POR ENCARGO", cls: "text-white/70 border-white/25" },
   agotado: { label: "AGOTADO", cls: "text-white/40 border-white/15" },
 };
 export function statusVisual(status) {
@@ -62,7 +63,9 @@ export async function fetchCatalog() {
     productVariants.forEach((v) => {
       statusByVariant[`${v.color_name}-${v.size_name}`] = { id: v.id, status: v.status };
     });
-    const overallStatus = productVariants.some((v) => v.status !== "agotado") ? "disponible" : "agotado";
+    const overallStatus = productVariants.some((v) => v.status === "disponible")
+      ? "disponible"
+      : productVariants.length ? "por_encargo" : "agotado";
     return {
       id: p.id,
       name: p.name,
@@ -141,7 +144,7 @@ export async function createOrderFromCart(cart, customer = {}) {
 export function buildWhatsappMessage(order, cart) {
   let msg = `Hola, quiero realizar el pedido *#${order.order_number}* en *ROYAL URBAN*.\n\nProductos:\n\n`;
   cart.forEach((c) => {
-    msg += `• ${c.name}\n  Talla: ${c.size} | Color: ${c.color}\n  Cantidad: ${c.qty}\n  Precio: $${c.price.toLocaleString("es-CO")}\n\n`;
+    msg += `• ${c.name}\n  Talla: ${c.size} | Color: ${c.color}\n  Cantidad: ${c.qty}${c.onRequest ? "\n  *Por encargo*" : ""}\n  Precio: $${c.price.toLocaleString("es-CO")}\n\n`;
   });
   msg += `Total: $${order.total.toLocaleString("es-CO")}\n\nQuedo atento.`;
   return msg;
@@ -221,6 +224,17 @@ export async function fetchColors() {
   return data;
 }
 
+// Crea un color manual (o devuelve el existente si ya hay uno con ese nombre).
+export async function createColor(name) {
+  const clean = name.trim().replace(/\s+/g, " ");
+  const { data: existing, error: sErr } = await supabase.from("colors").select("*").ilike("name", clean).limit(1);
+  if (sErr) throw sErr;
+  if (existing?.length) return existing[0];
+  const { data, error } = await supabase.from("colors").insert({ name: clean }).select().single();
+  if (error) throw error;
+  return data;
+}
+
 export async function fetchSizes() {
   const { data, error } = await supabase.from("sizes").select("*").order("position");
   if (error) throw error;
@@ -240,7 +254,7 @@ function slugifyProduct(text) {
 // Movimientos, tal como pide la regla de negocio: todo cambio de stock pasa por el kardex).
 export async function createProductWithVariants({
   name, description, categoryId, price, oldPrice, skuBase, featured, isNew, inCollection, imageUrl,
-  colorIds = [], sizeIds = [], minStock = 3,
+  colorIds = [], sizeIds = [], minStock = 0,
 }) {
   const slug = slugifyProduct(name);
   const { data: product, error: pErr } = await supabase
@@ -401,9 +415,13 @@ export async function updateOrderStatus(orderId, status, orderItems = []) {
   if (status === "Confirmado") {
     for (const item of orderItems) {
       if (!item.variant_id) continue;
+      // Lo que no está en stock queda "por encargo": solo se descuenta lo disponible.
+      const { data: v } = await supabase.from("product_variants").select("stock").eq("id", item.variant_id).single();
+      const qty = Math.min(item.qty, v?.stock ?? 0);
+      if (qty <= 0) continue;
       const { error } = await supabase
         .from("inventory_movements")
-        .insert({ variant_id: item.variant_id, type: "salida", qty: item.qty, reason: `Pedido #${orderId}` });
+        .insert({ variant_id: item.variant_id, type: "salida", qty, reason: `Pedido #${orderId}` });
       if (error) throw new Error(`No se pudo confirmar: ${error.message}`);
     }
   }
