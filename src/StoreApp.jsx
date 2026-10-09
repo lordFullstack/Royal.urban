@@ -50,6 +50,7 @@ export default function StoreApp() {
   const [checkoutError, setCheckoutError] = useState("");
   const [checkingOut, setCheckingOut] = useState(false);
   const [toast, setToast] = useState(null);
+  const [popupOpen, setPopupOpen] = useState(false);
   const [splash, setSplash] = useState("visible"); // visible | leaving | gone
   const tapTimer = useRef(null);
   const gridRef = useRef(null);
@@ -63,6 +64,18 @@ export default function StoreApp() {
   function openCollection() {
     setView("collection");
   }
+
+  // Pop-up de promoción: una vez por visita, cuando la bienvenida ya se fue.
+  useEffect(() => {
+    const pop = settings?.popup;
+    if (splash !== "gone" || !pop?.active || !(pop.title || pop.image_url)) return;
+    const id = `ru-popup:${pop.title}|${pop.description}|${pop.image_url}`;
+    try {
+      if (sessionStorage.getItem(id)) return;
+      sessionStorage.setItem(id, "1");
+    } catch {}
+    setPopupOpen(true);
+  }, [splash, settings]);
 
   const loadStore = useCallback(() => {
     setLoading(true);
@@ -196,6 +209,7 @@ export default function StoreApp() {
   }
 
   const closeToast = useCallback(() => setToast(null), []);
+  const closePopup = useCallback(() => setPopupOpen(false), []);
   const brand = settings?.brand || { name: "ROYAL URBAN", slogan: "Viste tu mejor versión", hero_image: "" };
   const dataReady = !loading && !loadError;
   const showNav = view !== "product";
@@ -554,6 +568,18 @@ export default function StoreApp() {
             </nav>
           )}
 
+          {popupOpen && settings?.popup && (
+            <PromoPopup
+              popup={settings.popup}
+              onClose={closePopup}
+              onCta={() => {
+                closePopup();
+                setView("home");
+                setTimeout(() => gridRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
+              }}
+            />
+          )}
+
           <Toast
             toast={toast}
             onClose={closeToast}
@@ -561,6 +587,39 @@ export default function StoreApp() {
           />
         </>
       )}
+    </div>
+  );
+}
+
+/* ============================================================
+   Pop-up de promoción — se cierra solo
+   ============================================================ */
+function PromoPopup({ popup, onClose, onCta }) {
+  const seconds = Math.min(30, Math.max(3, Number(popup.seconds) || 6));
+  useEffect(() => {
+    const t = setTimeout(onClose, seconds * 1000);
+    return () => clearTimeout(t);
+  }, [seconds, onClose]);
+
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center p-5 bg-black/70 backdrop-blur-sm" onClick={onClose} role="dialog" aria-modal="true" aria-label={popup.title || "Promoción"}>
+      <div className="relative w-full max-w-sm surface overflow-hidden" onClick={(e) => e.stopPropagation()}>
+        <button onClick={onClose} aria-label="Cerrar" className="absolute top-2.5 right-2.5 z-10 w-9 h-9 rounded-full bg-black/60 backdrop-blur-md flex items-center justify-center text-white">
+          <X size={18} />
+        </button>
+        {popup.image_url && <img src={popup.image_url} alt="" className="w-full aspect-square object-cover" />}
+        <div className="p-5 text-center">
+          {popup.title && <p className="text-xl font-semibold tracking-tight">{popup.title}</p>}
+          {popup.description && <p className="text-sm text-muted mt-1.5">{popup.description}</p>}
+          {popup.cta_label && (
+            <Button size="lg" className="w-full mt-4" onClick={onCta}>{popup.cta_label}</Button>
+          )}
+        </div>
+        <div className="h-1 bg-line/60">
+          <div className="h-full bg-gold" style={{ animation: `ru-popup-bar ${seconds}s linear forwards` }} />
+        </div>
+      </div>
+      <style>{`@keyframes ru-popup-bar { from { width: 100%; } to { width: 0%; } }`}</style>
     </div>
   );
 }

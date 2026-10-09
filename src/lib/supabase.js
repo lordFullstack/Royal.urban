@@ -493,6 +493,6 @@ export async function updateOrderStatus(orderId, status, orderItems = []) {
 }
 
 export async function updateSettings(key, value) {
-  const { error } = await supabase.from("settings").update({ value, updated_at: new Date().toISOString() }).eq("key", key);
+  const { error } = await supabase.from("settings").upsert({ key, value, updated_at: new Date().toISOString() }, { onConflict: "key" });
   if (error) throw error;
 }

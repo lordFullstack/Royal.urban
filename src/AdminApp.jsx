@@ -1794,6 +1794,7 @@ function Configuracion() {
         updateSettings("whatsapp", settings.whatsapp),
         updateSettings("social", settings.social),
         updateSettings("catalog_flags", settings.catalog_flags),
+        updateSettings("popup", settings.popup || { active: false }),
       ]);
       setSaved(true);
       notify("Configuración guardada");
@@ -1806,6 +1807,22 @@ function Configuracion() {
   }
 
   const set = (group, key, value) => setSettingsState((s) => ({ ...s, [group]: { ...s[group], [key]: value } }));
+
+  async function handlePopupUpload(e) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploading(true);
+    setUploadError("");
+    try {
+      const url = await uploadImage(file, "brand");
+      set("popup", "image_url", url);
+    } catch (err) {
+      setUploadError("No se pudo subir la imagen: " + err.message);
+    } finally {
+      setUploading(false);
+      e.target.value = "";
+    }
+  }
 
   async function handleHeroUpload(e) {
     const file = e.target.files?.[0];
@@ -1834,6 +1851,21 @@ function Configuracion() {
         </div>
         <Field label="Imagen de portada" error={uploadError}>
           <ImageUpload url={settings.brand?.hero_image} uploading={uploading} onChange={handleHeroUpload} help="Tamaño ideal: 1600×900px, menos de 300KB." />
+        </Field>
+      </SectionBlock>
+
+      <SectionBlock title="Pop-up de promoción" description="Aparece al entrar a la tienda y se cierra solo. Se muestra una vez por visita.">
+        <div className="divide-y divide-line/60 -my-1">
+          <Switch label="Mostrar pop-up" checked={!!settings.popup?.active} onChange={(v) => set("popup", "active", v)} />
+        </div>
+        <SettingField id="cfg-pop-title" label="Título" value={settings.popup?.title || ""} onChange={(v) => set("popup", "title", v)} placeholder="Ej. -20% en Hoodies" />
+        <SettingField id="cfg-pop-desc" label="Texto" value={settings.popup?.description || ""} onChange={(v) => set("popup", "description", v)} placeholder="Ej. Solo este fin de semana" />
+        <div className="grid sm:grid-cols-2 gap-4">
+          <SettingField id="cfg-pop-cta" label="Texto del botón" value={settings.popup?.cta_label || ""} onChange={(v) => set("popup", "cta_label", v)} placeholder="Ej. Ver ofertas" help="Opcional. Lleva al catálogo." />
+          <SettingField id="cfg-pop-sec" label="Se cierra en (segundos)" value={settings.popup?.seconds ?? 6} onChange={(v) => set("popup", "seconds", v)} help="Entre 3 y 30." inputMode="numeric" />
+        </div>
+        <Field label="Imagen (opcional)" error={uploadError}>
+          <ImageUpload url={settings.popup?.image_url} uploading={uploading} onChange={handlePopupUpload} help="Tamaño ideal: 1080×1080px, menos de 300KB." />
         </Field>
       </SectionBlock>
 
