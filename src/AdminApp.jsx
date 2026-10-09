@@ -653,7 +653,7 @@ function Productos() {
   const [existingKeys, setExistingKeys] = useState([]);
   const [newColor, setNewColor] = useState("");
   const [addingColor, setAddingColor] = useState(false);
-  const emptyForm = { name: "", description: "", categoryId: "", price: "", oldPrice: "", skuBase: "", featured: false, isNew: false, inCollection: false, imageUrl: "", colorIds: [], sizeIds: [], stock: {} };
+  const emptyForm = { name: "", description: "", categoryId: "", price: "", oldPrice: "", skuBase: "", featured: false, isNew: false, inCollection: false, images: [], colorIds: [], sizeIds: [], stock: {} };
   const [form, setForm] = useState(emptyForm);
 
   function reload() { fetchAdminProducts().then(setProducts).finally(() => setLoading(false)); }
@@ -720,7 +720,7 @@ function Productos() {
         name: p.name || "", description: p.description || "", categoryId: p.category_id || "",
         price: p.price ?? "", oldPrice: p.old_price ?? "", skuBase: p.sku_base || "",
         featured: !!p.featured, isNew: !!p.is_new, inCollection: !!p.in_collection,
-        imageUrl: p.image_url || "", colorIds, sizeIds,
+        images: [p.image_url, ...(p.gallery || [])].filter(Boolean), colorIds, sizeIds,
         stock: Object.fromEntries(keys.map((k) => [`${k.color_id}|${k.size_id}`, String(k.stock)])),
       });
       setShowForm(true);
@@ -745,13 +745,15 @@ function Productos() {
   }
 
   async function handleImageUpload(e) {
-    const file = e.target.files?.[0];
-    if (!file) return;
+    const files = Array.from(e.target.files || []);
+    if (!files.length) return;
     setUploading(true);
     setError("");
     try {
-      const url = await uploadImage(file, "products");
-      setForm((f) => ({ ...f, imageUrl: url }));
+      for (const file of files) {
+        const url = await uploadImage(file, "products");
+        setForm((f) => ({ ...f, images: [...f.images, url] }));
+      }
     } catch (err) {
       setError("No se pudo subir la imagen: " + err.message);
     } finally {
@@ -784,7 +786,8 @@ function Productos() {
         featured: form.featured,
         isNew: form.isNew,
         inCollection: form.inCollection,
-        imageUrl: form.imageUrl,
+        imageUrl: form.images[0] || "",
+        gallery: form.images.slice(1),
         colorIds: form.colorIds,
         sizeIds: form.sizeIds,
         stockByKey: form.stock,
@@ -970,8 +973,31 @@ function Productos() {
             </div>
           </FormGroup>
 
-          <FormGroup title="Foto principal">
-            <ImageUpload url={form.imageUrl} uploading={uploading} onChange={handleImageUpload} label="Subir foto del producto" aspect="aspect-[4/3] sm:aspect-[16/9]" />
+          <FormGroup title="Fotos" hint={form.images.length ? `${form.images.length} foto(s)` : null}>
+            <div className="grid grid-cols-3 sm:grid-cols-4 gap-2.5">
+              {form.images.map((url, i) => (
+                <div key={url} className="relative aspect-square rounded-control overflow-hidden border border-line bg-bg/40">
+                  <img src={url} alt={`Foto ${i + 1}`} className="w-full h-full object-cover" />
+                  {i === 0 && <span className="absolute bottom-1 left-1 badge-neutral bg-black/70 text-[10px]">Principal</span>}
+                  <div className="absolute top-1 right-1 flex gap-1">
+                    {i > 0 && (
+                      <button type="button" aria-label="Hacer principal" title="Hacer principal" onClick={() => setForm((f) => ({ ...f, images: [url, ...f.images.filter((u) => u !== url)] }))} className="w-7 h-7 rounded-full bg-black/70 flex items-center justify-center text-gold">
+                        <Star size={13} />
+                      </button>
+                    )}
+                    <button type="button" aria-label="Quitar foto" title="Quitar foto" onClick={() => setForm((f) => ({ ...f, images: f.images.filter((u) => u !== url) }))} className="w-7 h-7 rounded-full bg-black/70 flex items-center justify-center text-white">
+                      <Trash2 size={13} />
+                    </button>
+                  </div>
+                </div>
+              ))}
+              <label className="aspect-square rounded-control border border-dashed border-line hover:border-faint/60 flex flex-col items-center justify-center gap-1.5 text-faint hover:text-muted cursor-pointer transition-colors">
+                {uploading ? <span className="spinner" /> : <Upload size={18} />}
+                <span className="text-[11px] font-medium text-center px-1">{uploading ? "Subiendo…" : "Agregar fotos"}</span>
+                <input type="file" accept="image/*" multiple className="sr-only" onChange={handleImageUpload} disabled={uploading} />
+              </label>
+            </div>
+            <p className="help">Puedes subir varias a la vez. La primera es la principal y se ve en el catálogo; en el producto se muestran todas como slider.</p>
           </FormGroup>
 
           <FormGroup title="Variantes" hint={variantsPreview > 0 ? `${variantsPreview} variantes se crearán` : null}>

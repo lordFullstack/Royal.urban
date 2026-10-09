@@ -75,6 +75,7 @@ export async function fetchCatalog() {
       oldPrice: p.old_price ? Number(p.old_price) : null,
       category: p.category_name,
       img: p.image_url,
+      images: [p.image_url, ...(p.gallery || [])].filter(Boolean),
       inCollection: p.in_collection,
       featured: p.featured,
       isNew: p.is_new,
@@ -254,7 +255,7 @@ function slugifyProduct(text) {
 // Movimientos, tal como pide la regla de negocio: todo cambio de stock pasa por el kardex).
 export async function createProductWithVariants({
   name, description, categoryId, price, oldPrice, skuBase, featured, isNew, inCollection, imageUrl,
-  colorIds = [], sizeIds = [], minStock = 0, stockByKey = {},
+  colorIds = [], sizeIds = [], minStock = 0, stockByKey = {}, gallery = [],
 }) {
   const slug = slugifyProduct(name);
   const { data: product, error: pErr } = await supabase
@@ -266,6 +267,7 @@ export async function createProductWithVariants({
       sku_base: skuBase || null,
       featured: !!featured, is_new: !!isNew, in_collection: !!inCollection,
       image_url: imageUrl || null,
+      gallery,
       active: true,
     })
     .select()
@@ -305,7 +307,7 @@ export async function fetchProductVariantKeys(productId) {
 // las existentes se conservan para no perder su stock ni su historial de movimientos/pedidos.
 export async function updateProductWithVariants(id, {
   name, description, categoryId, price, oldPrice, skuBase, featured, isNew, inCollection, imageUrl,
-  colorIds = [], sizeIds = [], stockByKey = {},
+  colorIds = [], sizeIds = [], stockByKey = {}, gallery = [],
 }) {
   const { error: pErr } = await supabase
     .from("products")
@@ -316,6 +318,7 @@ export async function updateProductWithVariants(id, {
       sku_base: skuBase || null,
       featured: !!featured, is_new: !!isNew, in_collection: !!inCollection,
       image_url: imageUrl || null,
+      gallery,
       updated_at: new Date().toISOString(),
     })
     .eq("id", id);

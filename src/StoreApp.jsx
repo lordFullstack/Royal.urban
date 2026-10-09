@@ -713,6 +713,43 @@ function ProductGrid({ items, onOpen }) {
   );
 }
 
+function ImageSlider({ images, alt }) {
+  const ref = useRef(null);
+  const [index, setIndex] = useState(0);
+  const multi = images.length > 1;
+
+  function onScroll() {
+    const el = ref.current;
+    if (el) setIndex(Math.round(el.scrollLeft / el.clientWidth));
+  }
+  function goTo(i) {
+    const el = ref.current;
+    if (el) el.scrollTo({ left: i * el.clientWidth, behavior: "smooth" });
+  }
+
+  return (
+    <div className="relative aspect-[4/5] md:rounded-card overflow-hidden bg-surface">
+      <div ref={ref} onScroll={onScroll} className="flex h-full overflow-x-auto snap-x snap-mandatory scrollbar-none">
+        {images.map((src, i) => (
+          <div key={src || i} className="w-full h-full shrink-0 snap-center">
+            <ProductImage src={src} alt={multi ? `${alt} ${i + 1}` : alt} eager={i === 0} />
+          </div>
+        ))}
+      </div>
+      {multi && (
+        <>
+          <div className="absolute bottom-3 inset-x-0 flex justify-center gap-1.5">
+            {images.map((_, i) => (
+              <button key={i} onClick={() => goTo(i)} aria-label={`Ver foto ${i + 1}`} className={cx("h-1.5 rounded-full transition-all", i === index ? "w-5 bg-white" : "w-1.5 bg-white/50")} />
+            ))}
+          </div>
+          <span className="absolute bottom-3 right-3 badge-neutral bg-black/60 backdrop-blur-md text-[11px]">{index + 1}/{images.length}</span>
+        </>
+      )}
+    </div>
+  );
+}
+
 function ProductImage({ src, alt, className = "", eager }) {
   const [failed, setFailed] = useState(false);
   if (!src || failed) {
@@ -828,9 +865,7 @@ function ProductDetail({ product, onBack, onAdd, onWhatsapp, whatsappBusy, cartC
       <div className="mx-auto max-w-6xl md:px-6 md:grid md:grid-cols-2 md:gap-10 lg:gap-14 md:items-start">
         {/* Imagen dominante */}
         <div className="relative md:sticky md:top-6">
-          <div className="aspect-[4/5] md:rounded-card overflow-hidden bg-surface">
-            <ProductImage src={product.img} alt={product.name} eager />
-          </div>
+          <ImageSlider images={product.images?.length ? product.images : [product.img]} alt={product.name} />
           <div className="absolute inset-x-0 top-0 p-3 pt-[max(0.75rem,env(safe-area-inset-top))] flex items-center justify-between bg-gradient-to-b from-black/40 to-transparent md:from-transparent">
             <IconButton glass label="Volver" onClick={onBack}>
               <ChevronLeft size={22} />
