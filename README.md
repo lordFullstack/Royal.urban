@@ -7,9 +7,9 @@ Catálogo digital + WhatsApp + inventario + panel admin.
 ```
 index.html            → tienda pública (/)
 admin/index.html       → panel admin (/admin)
-src/StoreApp.jsx        → UI pública (Fase 2)
-src/AdminApp.jsx        → UI admin (Fase 3)
-src/lib/supabase.js     → integración Supabase + WhatsApp (Fase 5)
+src/StoreApp.jsx        → UI pública
+src/AdminApp.jsx        → UI admin
+src/lib/supabase.js     → integración Supabase + WhatsApp
 .github/workflows/      → deploy automático a GitHub Pages
 ```
 
@@ -23,13 +23,10 @@ src/lib/supabase.js     → integración Supabase + WhatsApp (Fase 5)
    ```
 3. `npm run dev` → tienda en `http://localhost:5173`, admin en `http://localhost:5173/admin/`
 
-## Conectar los datos reales (pendiente, Fase 6)
+## Datos
 
-`StoreApp.jsx` y `AdminApp.jsx` todavía usan datos mock (`PRODUCTS`, `INITIAL_ORDERS`, etc.).
-Hay que reemplazarlos por las funciones de `src/lib/supabase.js`
-(`fetchPublicProducts`, `fetchVariantStatus`, `openWhatsappCheckout`,
-`confirmOrderAndDiscountStock`, etc. — el mapeo exacto está comentado
-al final de ese archivo).
+`StoreApp.jsx` y `AdminApp.jsx` leen y escriben en Supabase a través de
+`src/lib/supabase.js` (catálogo, promociones, ajustes, pedidos, auth del admin).
 
 ## Deploy
 
@@ -45,6 +42,4 @@ al final de ese archivo).
 ## Base de datos
 
 Proyecto Supabase: `yeisi-royale-urban` (`sa-east-1`).
-Esquema completo, RLS y datos de ejemplo ya aplicados — ver
-`yeisi-royale-urban-schema.sql` para el detalle y el snippet de
-`TRUNCATE` para borrar el catálogo demo cuando cargues productos reales.
+Esquema, RLS y datos de ejemplo ya aplicados en el proyecto (se gestionan desde Supabase).

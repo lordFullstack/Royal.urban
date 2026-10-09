@@ -181,12 +181,14 @@ export default function StoreApp() {
     if (cart.length === 0) return openGeneralWhatsapp();
     setCheckoutError("");
     setCheckingOut(true);
+    const targetWindow = window.open("", "_blank");
     try {
-      await openWhatsappCheckout(cart, {});
+      await openWhatsappCheckout(cart, {}, { targetWindow });
       setCart([]);
       setView("home");
       setToast({ id: Date.now(), message: "Pedido registrado. Continúa la compra en WhatsApp." });
     } catch (e) {
+      if (targetWindow && !targetWindow.closed) targetWindow.close();
       setCheckoutError("No se pudo registrar el pedido. Intenta de nuevo.");
     } finally {
       setCheckingOut(false);
