@@ -286,6 +286,47 @@ export async function createProductWithVariants({
   return product;
 }
 
+export async function fetchProductVariantKeys(productId) {
+  const { data, error } = await supabase.from("product_variants").select("color_id, size_id").eq("product_id", productId);
+  if (error) throw error;
+  return data;
+}
+
+// Edita un producto ya publicado. Solo AGREGA variantes nuevas (color/talla):
+// las existentes se conservan para no perder su stock ni su historial de movimientos/pedidos.
+export async function updateProductWithVariants(id, {
+  name, description, categoryId, price, oldPrice, skuBase, featured, isNew, inCollection, imageUrl,
+  colorIds = [], sizeIds = [],
+}) {
+  const { error: pErr } = await supabase
+    .from("products")
+    .update({
+      name, description: description || null,
+      category_id: categoryId || null,
+      price, old_price: oldPrice || null,
+      sku_base: skuBase || null,
+      featured: !!featured, is_new: !!isNew, in_collection: !!inCollection,
+      image_url: imageUrl || null,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", id);
+  if (pErr) throw pErr;
+
+  const existing = new Set((await fetchProductVariantKeys(id)).map((v) => `${v.color_id}|${v.size_id}`));
+  const variants = [];
+  for (const colorId of colorIds) {
+    for (const sizeId of sizeIds) {
+      if (!existing.has(`${colorId}|${sizeId}`)) {
+        variants.push({ product_id: id, color_id: colorId, size_id: sizeId, min_stock: 0, stock: 0 });
+      }
+    }
+  }
+  if (variants.length) {
+    const { error: vErr } = await supabase.from("product_variants").insert(variants);
+    if (vErr) throw vErr;
+  }
+}
+
 export async function deleteProduct(id) {
   const { error } = await supabase.from("products").delete().eq("id", id);
   if (error) throw error;

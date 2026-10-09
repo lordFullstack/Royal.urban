@@ -6,7 +6,7 @@ import {
 } from "lucide-react";
 import {
   signIn, signOut, getCurrentSession,
-  fetchAdminProducts, toggleProductActive, toggleProductCollection, createProductWithVariants, createColor, deleteProduct, fetchColors, fetchSizes,
+  fetchAdminProducts, toggleProductActive, toggleProductCollection, createProductWithVariants, updateProductWithVariants, fetchProductVariantKeys, createColor, deleteProduct, fetchColors, fetchSizes,
   fetchAdminCategories, toggleCategoryVisible, createCategory, updateCategoryName, deleteCategory,
   fetchAdminPromotions, createPromotion, updatePromotion, togglePromotionActive, deletePromotion,
   fetchInventory, fetchMovements, registerMovement,
@@ -444,9 +444,9 @@ function ListSkeleton({ rows = 5 }) {
   );
 }
 
-function OptionChip({ selected, onClick, children }) {
+function OptionChip({ selected, onClick, disabled, children }) {
   return (
-    <button type="button" onClick={onClick} aria-pressed={selected} className={cx("chip min-h-[36px] px-3.5 text-xs", selected && "chip-soft-active")}>
+    <button type="button" onClick={onClick} disabled={disabled} aria-pressed={selected} className={cx("chip min-h-[36px] px-3.5 text-xs", selected && "chip-soft-active", disabled && "opacity-70 cursor-not-allowed")}>
       {selected && <Check size={13} />} {children}
     </button>
   );
@@ -647,6 +647,10 @@ function Productos() {
   const [error, setError] = useState("");
   const [fieldErrors, setFieldErrors] = useState({});
   const [busyId, setBusyId] = useState(null);
+  const [editingId, setEditingId] = useState(null);
+  const [lockedColors, setLockedColors] = useState([]);
+  const [lockedSizes, setLockedSizes] = useState([]);
+  const [existingKeys, setExistingKeys] = useState([]);
   const [newColor, setNewColor] = useState("");
   const [addingColor, setAddingColor] = useState(false);
   const emptyForm = { name: "", description: "", categoryId: "", price: "", oldPrice: "", skuBase: "", featured: false, isNew: false, inCollection: false, imageUrl: "", colorIds: [], sizeIds: [] };
@@ -701,7 +705,34 @@ function Productos() {
     }
   }
 
+  async function openEdit(p) {
+    setError("");
+    setFieldErrors({});
+    try {
+      const keys = await fetchProductVariantKeys(p.id);
+      const colorIds = [...new Set(keys.map((k) => k.color_id))];
+      const sizeIds = [...new Set(keys.map((k) => k.size_id))];
+      setEditingId(p.id);
+      setLockedColors(colorIds);
+      setLockedSizes(sizeIds);
+      setExistingKeys(keys.map((k) => `${k.color_id}|${k.size_id}`));
+      setForm({
+        name: p.name || "", description: p.description || "", categoryId: p.category_id || "",
+        price: p.price ?? "", oldPrice: p.old_price ?? "", skuBase: p.sku_base || "",
+        featured: !!p.featured, isNew: !!p.is_new, inCollection: !!p.in_collection,
+        imageUrl: p.image_url || "", colorIds, sizeIds,
+      });
+      setShowForm(true);
+    } catch (err) {
+      notify("No se pudo abrir el producto: " + err.message, "error");
+    }
+  }
+
   function openCreate() {
+    setEditingId(null);
+    setLockedColors([]);
+    setLockedSizes([]);
+    setExistingKeys([]);
     setForm(emptyForm);
     setError("");
     setFieldErrors({});
@@ -741,7 +772,8 @@ function Productos() {
     }
     setSaving(true);
     try {
-      await createProductWithVariants({
+      const save = editingId ? (data) => updateProductWithVariants(editingId, data) : createProductWithVariants;
+      await save({
         name: form.name.trim(),
         description: form.description,
         categoryId: form.categoryId || null,
@@ -756,7 +788,7 @@ function Productos() {
         sizeIds: form.sizeIds,
       });
       setShowForm(false);
-      notify("Producto creado");
+      notify(editingId ? "Producto actualizado" : "Producto creado");
       reload();
     } catch (err) {
       setError(err.message);
@@ -782,7 +814,8 @@ function Productos() {
   }
 
   const list = products.filter((p) => p.name.toLowerCase().includes(query.toLowerCase()));
-  const variantsPreview = form.colorIds.length * form.sizeIds.length;
+  const variantsPreview = form.colorIds.reduce(
+    (n, c) => n + form.sizeIds.filter((s) => !existingKeys.includes(`${c}|${s}`)).length, 0);
 
   return (
     <div>
@@ -835,7 +868,10 @@ function Productos() {
                     <td className="text-center">{p.featured ? <Star size={15} className="inline text-gold fill-gold" aria-label="Destacado" /> : <span className="text-faint">—</span>}</td>
                     <td><ToggleBadge on={p.in_collection} onLabel="Sí" offLabel="No" busy={busyId === p.id} onClick={() => toggleCollection(p.id, p.in_collection)} /></td>
                     <td><ToggleBadge on={p.active} onLabel="Activo" offLabel="Oculto" busy={busyId === p.id} onClick={() => toggle(p.id, p.active)} /></td>
-                    <td className="text-right">
+                    <td className="text-right whitespace-nowrap">
+                      <IconButton label={`Editar ${p.name}`} onClick={() => openEdit(p)} className="w-9 h-9">
+                        <Pencil size={16} />
+                      </IconButton>
                       <IconButton label={`Eliminar ${p.name}`} onClick={() => remove(p)} className="w-9 h-9 hover:text-neon">
                         <Trash2 size={16} />
                       </IconButton>
@@ -859,9 +895,14 @@ function Productos() {
                       </p>
                       <p className="text-xs text-faint truncate">{p.categories?.name || "Sin categoría"} · {p.sku_base || "Sin SKU"}</p>
                     </div>
-                    <IconButton label={`Eliminar ${p.name}`} onClick={() => remove(p)} className="w-9 h-9 -mt-1.5 -mr-1.5 hover:text-neon">
-                      <Trash2 size={16} />
-                    </IconButton>
+                    <div className="flex shrink-0 -mt-1.5 -mr-1.5">
+                      <IconButton label={`Editar ${p.name}`} onClick={() => openEdit(p)} className="w-9 h-9">
+                        <Pencil size={16} />
+                      </IconButton>
+                      <IconButton label={`Eliminar ${p.name}`} onClick={() => remove(p)} className="w-9 h-9 hover:text-neon">
+                        <Trash2 size={16} />
+                      </IconButton>
+                    </div>
                   </div>
                   <p className="price text-sm mt-1">{money(p.price)}</p>
                   <div className="flex flex-wrap items-center gap-2 mt-2">
@@ -878,13 +919,13 @@ function Productos() {
       <Sheet
         open={showForm}
         onClose={() => setShowForm(false)}
-        title="Nuevo producto"
-        subtitle="Las variantes se crean automáticamente por color y talla."
+        title={editingId ? "Editar producto" : "Nuevo producto"}
+        subtitle={editingId ? "Puedes agregar colores y tallas nuevos; los existentes se conservan con su stock." : "Las variantes se crean automáticamente por color y talla."}
         size="lg"
         footer={
           <>
             <Button type="button" variant="outline" className="flex-1" onClick={() => setShowForm(false)}>Cancelar</Button>
-            <Button type="submit" form="product-form" variant="secondary" className="flex-1" loading={saving}>{saving ? "Creando…" : "Crear producto"}</Button>
+            <Button type="submit" form="product-form" variant="secondary" className="flex-1" loading={saving}>{editingId ? (saving ? "Guardando…" : "Guardar cambios") : saving ? "Creando…" : "Crear producto"}</Button>
           </>
         }
       >
@@ -929,7 +970,7 @@ function Productos() {
               <p className="label">Colores</p>
               <div className="flex gap-2 flex-wrap">
                 {colors.map((c) => (
-                  <OptionChip key={c.id} selected={form.colorIds.includes(c.id)} onClick={() => setForm((f) => ({ ...f, colorIds: toggleIn(f.colorIds, c.id) }))}>{c.name}</OptionChip>
+                  <OptionChip key={c.id} selected={form.colorIds.includes(c.id)} disabled={lockedColors.includes(c.id)} onClick={() => setForm((f) => ({ ...f, colorIds: toggleIn(f.colorIds, c.id) }))}>{c.name}</OptionChip>
                 ))}
               </div>
               <div className="flex gap-2 mt-2.5 max-w-sm">
@@ -949,10 +990,10 @@ function Productos() {
               <p className="label">Tallas</p>
               <div className="flex gap-2 flex-wrap">
                 {sizes.map((s) => (
-                  <OptionChip key={s.id} selected={form.sizeIds.includes(s.id)} onClick={() => setForm((f) => ({ ...f, sizeIds: toggleIn(f.sizeIds, s.id) }))}>{s.name}</OptionChip>
+                  <OptionChip key={s.id} selected={form.sizeIds.includes(s.id)} disabled={lockedSizes.includes(s.id)} onClick={() => setForm((f) => ({ ...f, sizeIds: toggleIn(f.sizeIds, s.id) }))}>{s.name}</OptionChip>
                 ))}
               </div>
-              <p className="help">Las variantes se crean con stock en 0 — cárgalo después desde Movimientos.</p>
+              <p className="help">Las variantes nuevas se crean con stock en 0 — cárgalo después desde Movimientos.{editingId && " Las ya existentes no se pueden quitar."}</p>
             </div>
           </FormGroup>
 
