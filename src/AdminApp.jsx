@@ -653,7 +653,7 @@ function Productos() {
   const [existingKeys, setExistingKeys] = useState([]);
   const [newColor, setNewColor] = useState("");
   const [addingColor, setAddingColor] = useState(false);
-  const emptyForm = { name: "", description: "", categoryId: "", price: "", oldPrice: "", skuBase: "", featured: false, isNew: false, inCollection: false, imageUrl: "", colorIds: [], sizeIds: [] };
+  const emptyForm = { name: "", description: "", categoryId: "", price: "", oldPrice: "", skuBase: "", featured: false, isNew: false, inCollection: false, imageUrl: "", colorIds: [], sizeIds: [], stock: {} };
   const [form, setForm] = useState(emptyForm);
 
   function reload() { fetchAdminProducts().then(setProducts).finally(() => setLoading(false)); }
@@ -721,6 +721,7 @@ function Productos() {
         price: p.price ?? "", oldPrice: p.old_price ?? "", skuBase: p.sku_base || "",
         featured: !!p.featured, isNew: !!p.is_new, inCollection: !!p.in_collection,
         imageUrl: p.image_url || "", colorIds, sizeIds,
+        stock: Object.fromEntries(keys.map((k) => [`${k.color_id}|${k.size_id}`, String(k.stock)])),
       });
       setShowForm(true);
     } catch (err) {
@@ -786,6 +787,7 @@ function Productos() {
         imageUrl: form.imageUrl,
         colorIds: form.colorIds,
         sizeIds: form.sizeIds,
+        stockByKey: form.stock,
       });
       setShowForm(false);
       notify(editingId ? "Producto actualizado" : "Producto creado");
@@ -816,6 +818,13 @@ function Productos() {
   const list = products.filter((p) => p.name.toLowerCase().includes(query.toLowerCase()));
   const variantsPreview = form.colorIds.reduce(
     (n, c) => n + form.sizeIds.filter((s) => !existingKeys.includes(`${c}|${s}`)).length, 0);
+
+  const variantsGrid = form.colorIds.flatMap((cid) =>
+    form.sizeIds.map((sid) => ({
+      key: `${cid}|${sid}`,
+      label: `${colors.find((c) => c.id === cid)?.name || "?"} / ${sizes.find((s) => s.id === sid)?.name || "?"}`,
+    }))
+  );
 
   return (
     <div>
@@ -993,9 +1002,33 @@ function Productos() {
                   <OptionChip key={s.id} selected={form.sizeIds.includes(s.id)} disabled={lockedSizes.includes(s.id)} onClick={() => setForm((f) => ({ ...f, sizeIds: toggleIn(f.sizeIds, s.id) }))}>{s.name}</OptionChip>
                 ))}
               </div>
-              <p className="help">Las variantes nuevas se crean con stock en 0 — cárgalo después desde Movimientos.{editingId && " Las ya existentes no se pueden quitar."}</p>
+              <p className="help">Pon las unidades de cada modelo más abajo.{editingId && " Las ya existentes no se pueden quitar."}</p>
             </div>
           </FormGroup>
+
+          {variantsGrid.length > 0 && (
+            <FormGroup title="Unidades por modelo" hint="0 = disponible por encargo">
+              <div className="surface divide-y divide-line/60">
+                {variantsGrid.map(({ key, label }) => (
+                  <div key={key} className="flex items-center justify-between gap-3 px-3.5 py-2">
+                    <span className="text-sm">{label}</span>
+                    <Input
+                      type="number"
+                      inputMode="numeric"
+                      min="0"
+                      step="1"
+                      value={form.stock[key] ?? ""}
+                      onChange={(e) => setForm((f) => ({ ...f, stock: { ...f.stock, [key]: e.target.value } }))}
+                      placeholder="0"
+                      aria-label={`Unidades de ${label}`}
+                      className="w-24 text-right"
+                    />
+                  </div>
+                ))}
+              </div>
+              <p className="help">{editingId ? "Al guardar, la diferencia queda registrada en Movimientos." : "Se registra como entrada de stock inicial en Movimientos."}</p>
+            </FormGroup>
+          )}
 
           <FormGroup title="Visibilidad">
             <div className="surface divide-y divide-line/60 px-3.5 py-1">

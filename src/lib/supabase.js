@@ -254,7 +254,7 @@ function slugifyProduct(text) {
 // Movimientos, tal como pide la regla de negocio: todo cambio de stock pasa por el kardex).
 export async function createProductWithVariants({
   name, description, categoryId, price, oldPrice, skuBase, featured, isNew, inCollection, imageUrl,
-  colorIds = [], sizeIds = [], minStock = 0,
+  colorIds = [], sizeIds = [], minStock = 0, stockByKey = {},
 }) {
   const slug = slugifyProduct(name);
   const { data: product, error: pErr } = await supabase
@@ -279,15 +279,24 @@ export async function createProductWithVariants({
         variants.push({ product_id: product.id, color_id: colorId, size_id: sizeId, min_stock: minStock, stock: 0 });
       }
     }
-    const { error: vErr } = await supabase.from("product_variants").insert(variants);
+    const { data: created, error: vErr } = await supabase.from("product_variants").insert(variants).select("id, color_id, size_id");
     if (vErr) throw vErr;
+    await registerInitialStock(created, stockByKey, "Stock inicial");
   }
 
   return product;
 }
 
+// Todo cambio de stock pasa por el kardex (inventory_movements): el trigger actualiza product_variants.
+async function registerInitialStock(variants, stockByKey, reason) {
+  for (const v of variants) {
+    const qty = Math.max(0, Math.floor(Number(stockByKey[`${v.color_id}|${v.size_id}`]) || 0));
+    if (qty > 0) await registerMovement({ variantId: v.id, type: "entrada", qty, reason });
+  }
+}
+
 export async function fetchProductVariantKeys(productId) {
-  const { data, error } = await supabase.from("product_variants").select("color_id, size_id").eq("product_id", productId);
+  const { data, error } = await supabase.from("product_variants").select("id, color_id, size_id, stock").eq("product_id", productId);
   if (error) throw error;
   return data;
 }
@@ -296,7 +305,7 @@ export async function fetchProductVariantKeys(productId) {
 // las existentes se conservan para no perder su stock ni su historial de movimientos/pedidos.
 export async function updateProductWithVariants(id, {
   name, description, categoryId, price, oldPrice, skuBase, featured, isNew, inCollection, imageUrl,
-  colorIds = [], sizeIds = [],
+  colorIds = [], sizeIds = [], stockByKey = {},
 }) {
   const { error: pErr } = await supabase
     .from("products")
@@ -312,7 +321,19 @@ export async function updateProductWithVariants(id, {
     .eq("id", id);
   if (pErr) throw pErr;
 
-  const existing = new Set((await fetchProductVariantKeys(id)).map((v) => `${v.color_id}|${v.size_id}`));
+  const current = await fetchProductVariantKeys(id);
+  const existing = new Set(current.map((v) => `${v.color_id}|${v.size_id}`));
+
+  // Variantes existentes: si cambió la cantidad, se registra un ajuste por la diferencia.
+  for (const v of current) {
+    const key = `${v.color_id}|${v.size_id}`;
+    if (!(key in stockByKey) || stockByKey[key] === "") continue;
+    const target = Math.max(0, Math.floor(Number(stockByKey[key]) || 0));
+    if (target !== v.stock) {
+      await registerMovement({ variantId: v.id, type: "ajuste", qty: target - v.stock, reason: "Edición de producto" });
+    }
+  }
+
   const variants = [];
   for (const colorId of colorIds) {
     for (const sizeId of sizeIds) {
@@ -322,8 +343,9 @@ export async function updateProductWithVariants(id, {
     }
   }
   if (variants.length) {
-    const { error: vErr } = await supabase.from("product_variants").insert(variants);
+    const { data: created, error: vErr } = await supabase.from("product_variants").insert(variants).select("id, color_id, size_id");
     if (vErr) throw vErr;
+    await registerInitialStock(created, stockByKey, "Stock inicial");
   }
 }
 
