@@ -10,7 +10,7 @@ import {
   fetchAdminCategories, toggleCategoryVisible, createCategory, updateCategoryName, deleteCategory,
   fetchAdminPromotions, createPromotion, updatePromotion, togglePromotionActive, deletePromotion,
   fetchInventory, fetchMovements, registerMovement,
-  fetchOrders, updateOrderStatus,
+  fetchOrders, updateOrderStatus, ORDER_COMMITTED,
   fetchSettings, updateSettings, uploadImage,
 } from "./lib/supabase";
 import {
@@ -54,6 +54,12 @@ const NAV = [
   { group: "Sistema", items: [{ id: "configuracion", label: "Configuración", icon: Settings }] },
 ];
 const SECTION_LABEL = Object.fromEntries(NAV.flatMap((g) => g.items.map((i) => [i.id, i.label])));
+
+/** Precio en pesos tal como lo escribe una persona: "89.900", "89,900" o "$ 89 900" → 89900. */
+function parsePesos(v) {
+  const digits = String(v ?? "").replace(/[^0-9]/g, "");
+  return digits ? Number(digits) : null;
+}
 
 function fmtDate(d, withTime) {
   const date = new Date(d);
@@ -718,7 +724,8 @@ function Productos() {
       setExistingKeys(keys.map((k) => `${k.color_id}|${k.size_id}`));
       setForm({
         name: p.name || "", description: p.description || "", categoryId: p.category_id || "",
-        price: p.price ?? "", oldPrice: p.old_price ?? "", skuBase: p.sku_base || "",
+        // en pesos enteros: "100000.00" no debe leerse como 10000000
+        price: p.price != null ? String(Math.round(Number(p.price))) : "", oldPrice: p.old_price != null ? String(Math.round(Number(p.old_price))) : "", skuBase: p.sku_base || "",
         featured: !!p.featured, isNew: !!p.is_new, inCollection: !!p.in_collection,
         images: [p.image_url, ...(p.gallery || [])].filter(Boolean), colorIds, sizeIds,
         stock: Object.fromEntries(keys.map((k) => [`${k.color_id}|${k.size_id}`, String(k.stock)])),
@@ -767,7 +774,7 @@ function Productos() {
     setError("");
     const fe = {};
     if (!form.name.trim()) fe.name = "Escribe el nombre del producto.";
-    if (!form.price) fe.price = "Indica el precio.";
+    if (!parsePesos(form.price)) fe.price = "Indica el precio.";
     setFieldErrors(fe);
     if (Object.keys(fe).length) {
       setError("Nombre y precio son obligatorios.");
@@ -780,8 +787,8 @@ function Productos() {
         name: form.name.trim(),
         description: form.description,
         categoryId: form.categoryId || null,
-        price: Number(form.price),
-        oldPrice: form.oldPrice ? Number(form.oldPrice) : null,
+        price: parsePesos(form.price),
+        oldPrice: parsePesos(form.oldPrice),
         skuBase: form.skuBase,
         featured: form.featured,
         isNew: form.isNew,
@@ -965,10 +972,10 @@ function Productos() {
           <FormGroup title="Precio">
             <div className="grid grid-cols-2 gap-4">
               <Field label="Precio *" htmlFor="p-price" error={fieldErrors.price}>
-                <Input id="p-price" type="number" inputMode="numeric" min="0" value={form.price} onChange={(e) => setForm({ ...form, price: e.target.value })} placeholder="89900" invalid={!!fieldErrors.price} />
+                <Input id="p-price" inputMode="numeric" value={form.price} onChange={(e) => setForm({ ...form, price: e.target.value })} placeholder="89900" invalid={!!fieldErrors.price} />
               </Field>
               <Field label="Precio anterior" htmlFor="p-old" help="Se muestra tachado">
-                <Input id="p-old" type="number" inputMode="numeric" min="0" value={form.oldPrice} onChange={(e) => setForm({ ...form, oldPrice: e.target.value })} placeholder="Opcional" />
+                <Input id="p-old" inputMode="numeric" value={form.oldPrice} onChange={(e) => setForm({ ...form, oldPrice: e.target.value })} placeholder="Opcional" />
               </Field>
             </div>
           </FormGroup>
@@ -1095,6 +1102,7 @@ function Categorias() {
   const [editingId, setEditingId] = useState(null);
   const [editName, setEditName] = useState("");
   const [error, setError] = useState("");
+  const editCancelled = useRef(false);
 
   function reload() { fetchAdminCategories().then(setCats).finally(() => setLoading(false)); }
   useEffect(reload, []);
@@ -1126,13 +1134,15 @@ function Categorias() {
   }
 
   function startEdit(c) {
+    editCancelled.current = false;
     setEditingId(c.id);
     setEditName(c.name);
   }
 
-  async function saveEdit(id) {
-    if (editingId !== id) return;
-    if (!editName.trim()) return;
+  async function saveEdit(id, original) {
+    if (editingId !== id || editCancelled.current) return;
+    editCancelled.current = true; // Enter + blur no guardan dos veces
+    if (!editName.trim() || editName.trim() === original) return setEditingId(null);
     try {
       await updateCategoryName(id, editName.trim());
       setEditingId(null);
@@ -1186,10 +1196,10 @@ function Categorias() {
                   value={editName}
                   onChange={(e) => setEditName(e.target.value)}
                   onKeyDown={(e) => {
-                    if (e.key === "Enter") saveEdit(c.id);
-                    if (e.key === "Escape") setEditingId(null);
+                    if (e.key === "Enter") saveEdit(c.id, c.name);
+                    if (e.key === "Escape") { editCancelled.current = true; setEditingId(null); }
                   }}
-                  onBlur={() => saveEdit(c.id)}
+                  onBlur={() => saveEdit(c.id, c.name)}
                   aria-label="Nombre de la categoría"
                   className="flex-1 min-h-[40px]"
                 />
@@ -1257,8 +1267,11 @@ function Promociones() {
   async function submit(e) {
     e.preventDefault();
     setError("");
+    if (!form.title.trim()) return setError("Escribe el título de la campaña.");
+    if (form.linkType === "category" && !form.cta_category_id) return setError("Elige la categoría a la que lleva la tarjeta.");
+    if (form.linkType === "product" && !form.cta_product_id) return setError("Elige el producto al que lleva la tarjeta.");
     const payload = {
-      title: form.title, description: form.description, image_url: form.image_url, cta_label: form.cta_label,
+      title: form.title.trim(), description: form.description, image_url: form.image_url, cta_label: form.cta_label,
       cta_category_id: form.linkType === "category" ? form.cta_category_id : null,
       cta_product_id: form.linkType === "product" ? form.cta_product_id : null,
     };
@@ -1538,13 +1551,22 @@ function Movimientos() {
   async function submit(e) {
     e.preventDefault();
     setError("");
-    if (!form.variantId || !form.qty) {
-      setError("Selecciona la variante e indica la cantidad.");
+    const qty = Number(form.qty);
+    if (!form.variantId || !form.qty || !Number.isInteger(qty) || qty === 0) {
+      setError("Selecciona la variante e indica una cantidad entera distinta de 0.");
+      return;
+    }
+    if (form.type !== "ajuste" && qty < 0) {
+      setError("En entradas y salidas la cantidad va en positivo. Para restar usa Salida, o Ajuste con número negativo.");
+      return;
+    }
+    if (form.type === "salida" && selectedVariant && qty > selectedVariant.stock) {
+      setError(`Solo hay ${selectedVariant.stock} unidades de esta variante.`);
       return;
     }
     setSaving(true);
     try {
-      await registerMovement({ variantId: form.variantId, type: form.type, qty: Number(form.qty), reason: form.reason });
+      await registerMovement({ variantId: form.variantId, type: form.type, qty, reason: form.reason });
       setForm({ variantId: "", type: "entrada", qty: "", reason: "" });
       setShowForm(false);
       notify("Movimiento registrado");
@@ -1680,22 +1702,35 @@ function Pedidos() {
   useEffect(reload, []);
 
   async function changeStatus(order, status) {
-    if (status === "Confirmado") {
+    const was = ORDER_COMMITTED.includes(order.status);
+    const will = ORDER_COMMITTED.includes(status);
+    if (!was && will) {
       const ok = await confirm({
-        title: `¿Confirmar pedido #${order.order_number}?`,
-        message: "Al confirmar se descuenta el stock de cada producto del pedido.",
-        confirmLabel: "Confirmar y descontar stock",
+        title: `¿Pasar el pedido #${order.order_number} a “${status}”?`,
+        message: "Se descuenta el stock de cada producto del pedido (lo que no haya en stock queda por encargo).",
+        confirmLabel: "Sí, descontar stock",
       });
       if (!ok) return;
-    }
-    if (status === "Cancelado") {
-      const ok = await confirm({ title: `¿Cancelar pedido #${order.order_number}?`, message: "El pedido quedará marcado como cancelado.", confirmLabel: "Cancelar pedido", danger: true });
+    } else if (status === "Cancelado") {
+      const ok = await confirm({
+        title: `¿Cancelar pedido #${order.order_number}?`,
+        message: was ? "El pedido quedará cancelado y sus unidades vuelven al inventario." : "El pedido quedará marcado como cancelado.",
+        confirmLabel: "Cancelar pedido",
+        danger: true,
+      });
+      if (!ok) return;
+    } else if (was && !will) {
+      const ok = await confirm({
+        title: `¿Devolver el pedido #${order.order_number} a “${status}”?`,
+        message: "Sus unidades vuelven al inventario. Si lo confirmas de nuevo, se descontarán otra vez.",
+        confirmLabel: "Sí, devolver stock",
+      });
       if (!ok) return;
     }
     setBusy(order.id);
     setError("");
     try {
-      await updateOrderStatus(order.id, status, order.order_items);
+      await updateOrderStatus(order.id, status, order.order_items, order.status);
       notify(`Pedido #${order.order_number} → ${status}`);
       reload();
     } catch (err) {

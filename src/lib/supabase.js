@@ -259,7 +259,10 @@ export async function createProductWithVariants({
   name, description, categoryId, price, oldPrice, skuBase, featured, isNew, inCollection, imageUrl,
   colorIds = [], sizeIds = [], minStock = 0, stockByKey = {}, gallery = [],
 }) {
-  const slug = slugifyProduct(name);
+  // si ya hay un producto con el mismo nombre, el slug lleva un sufijo para no chocar
+  let slug = slugifyProduct(name);
+  const { data: same } = await supabase.from("products").select("id").eq("slug", slug).limit(1);
+  if (same?.length) slug = `${slug}-${Date.now().toString(36).slice(-4)}`;
   const { data: product, error: pErr } = await supabase
     .from("products")
     .insert({
@@ -284,7 +287,11 @@ export async function createProductWithVariants({
       }
     }
     const { data: created, error: vErr } = await supabase.from("product_variants").insert(variants).select("id, color_id, size_id");
-    if (vErr) throw vErr;
+    if (vErr) {
+      // sin variantes el producto quedaría a medias: se deshace
+      await supabase.from("products").delete().eq("id", product.id);
+      throw vErr;
+    }
     await registerInitialStock(created, stockByKey, "Stock inicial");
   }
 
@@ -356,6 +363,9 @@ export async function updateProductWithVariants(id, {
 
 export async function deleteProduct(id) {
   const { error } = await supabase.from("products").delete().eq("id", id);
+  if (error?.code === "23503") {
+    throw new Error("este producto ya tiene pedidos o movimientos de inventario registrados. Ocúltalo en lugar de eliminarlo para conservar el historial.");
+  }
   if (error) throw error;
 }
 
@@ -476,11 +486,43 @@ export async function fetchOrders() {
   return data;
 }
 
-// Confirmar pedido: genera movimientos 'salida' por cada ítem (el trigger
-// descuenta stock real y bloquea si ya no hay disponibilidad) y solo
-// entonces marca el pedido como Confirmado.
-export async function updateOrderStatus(orderId, status, orderItems = []) {
-  if (status === "Confirmado") {
+// Estados en los que el pedido ya tiene su mercancía apartada (stock descontado).
+export const ORDER_COMMITTED = ["Confirmado", "Preparando", "Enviado", "Entregado"];
+
+// Unidades que el pedido tiene descontadas ahora mismo, por variante
+// (salidas "Pedido #id" menos devoluciones "Pedido #id (devuelto)").
+async function orderStockTaken(orderId) {
+  const { data, error } = await supabase
+    .from("inventory_movements")
+    .select("variant_id, type, qty")
+    .in("reason", [`Pedido #${orderId}`, `Pedido #${orderId} (devuelto)`]);
+  if (error) throw error;
+  const net = {};
+  for (const m of data) net[m.variant_id] = (net[m.variant_id] || 0) + (m.type === "salida" ? m.qty : -m.qty);
+  return net;
+}
+
+// Cambiar el estado de un pedido:
+// - al pasar a Confirmado (o a cualquier estado posterior) se descuenta el stock UNA sola vez
+//   con movimientos 'salida' (el trigger descuenta y bloquea si ya no hay disponibilidad);
+// - al cancelarlo o devolverlo a Nuevo/Contactado, se devuelve lo que se había descontado.
+export async function updateOrderStatus(orderId, status, orderItems = [], prevStatus = null) {
+  const was = ORDER_COMMITTED.includes(prevStatus);
+  const will = ORDER_COMMITTED.includes(status);
+  // el historial de movimientos confirma lo ya descontado; además solo se descuenta al
+  // ENTRAR en un estado comprometido (así no se duplica aunque el rol no pueda leer movimientos)
+  const taken = await orderStockTaken(orderId);
+  const isTaken = Object.values(taken).some((q) => q > 0);
+  if (was && !will && isTaken) {
+    for (const [variantId, qty] of Object.entries(taken)) {
+      if (qty <= 0) continue;
+      const { error } = await supabase
+        .from("inventory_movements")
+        .insert({ variant_id: variantId, type: "entrada", qty, reason: `Pedido #${orderId} (devuelto)` });
+      if (error) throw new Error(`No se pudo devolver el stock: ${error.message}`);
+    }
+  }
+  if (!was && will && !isTaken) {
     for (const item of orderItems) {
       if (!item.variant_id) continue;
       // Lo que no está en stock queda "por encargo": solo se descuenta lo disponible.
