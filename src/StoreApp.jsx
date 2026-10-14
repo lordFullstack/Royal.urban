@@ -3,7 +3,7 @@ import {
   Search, ShoppingBag, X, Plus, Minus, Home, LayoutGrid, MessageCircle, ChevronLeft, ChevronRight,
   Flame, Trash2, Shirt, RefreshCw, WifiOff, ArrowRight, SearchX,
 } from "lucide-react";
-import { fetchCatalog, fetchCategories, fetchActivePromotions, fetchSettings, openWhatsappCheckout, statusVisual } from "./lib/supabase";
+import { fetchCatalog, fetchCategories, fetchActivePromotions, fetchSettings, createOrderFromCart, buildWhatsappMessage, whatsappUrl, goToWhatsapp, statusVisual } from "./lib/supabase";
 import { BrandMark, Button, IconButton, Badge, EmptyState, Alert, Toast, SectionHeader, cx, money } from "./ui";
 
 /* ---------------------------------------------------------
@@ -57,7 +57,7 @@ export default function StoreApp() {
   const [selectedProduct, setSelectedProduct] = useState(null);
   const [cart, setCart] = useState(readCart);
   const [logoTaps, setLogoTaps] = useState(0);
-  const [checkoutError, setCheckoutError] = useState("");
+  const [checkoutError, setCheckoutError] = useState(null); // { detail, url }
   const [checkingOut, setCheckingOut] = useState(false);
   const [toast, setToast] = useState(null);
   const [popupOpen, setPopupOpen] = useState(false);
@@ -250,45 +250,39 @@ export default function StoreApp() {
     }
   }
 
-  async function openGeneralWhatsapp() {
-    try {
-      const s = await fetchSettings();
-      const number = s.whatsapp?.number || "573000000000";
-      const message = s.whatsapp?.default_message || `Hola, quiero más información de ${s.brand?.name || "ROYAL URBAN"}.`;
-      window.open(`https://wa.me/${number}?text=${encodeURIComponent(message)}`, "_blank");
-    } catch {
-      window.open("https://wa.me/573000000000", "_blank");
-    }
+  // el número de WhatsApp ya viene con la configuración cargada: no hace falta pedirlo otra vez
+  const waNumber = settings?.whatsapp?.number || "573000000000";
+
+  function openGeneralWhatsapp() {
+    const message = settings?.whatsapp?.default_message || `Hola, quiero más información de ${settings?.brand?.name || "ROYAL URBAN"}.`;
+    goToWhatsapp(whatsappUrl(waNumber, message));
   }
 
   /** Consulta por un producto concreto: abre WhatsApp sin crear pedido ni vaciar el carrito. */
-  async function askProductWhatsapp(product, color, size) {
-    const w = window.open("", "_blank"); // dentro del clic, para que no lo bloquee el navegador
-    let number = "573000000000";
-    try {
-      number = (await fetchSettings()).whatsapp?.number || number;
-    } catch {
-      /* sin conexión: número por defecto */
-    }
+  function askProductWhatsapp(product, color, size) {
     const text = `Hola, quiero información de *${product.name}*${size ? ` (talla ${size}` : ""}${color ? `${size ? ", " : " ("}color ${color}` : ""}${size || color ? ")" : ""}.`;
-    const url = `https://wa.me/${number}?text=${encodeURIComponent(text)}`;
-    if (w && !w.closed) w.location.href = url;
-    else window.location.href = url;
+    goToWhatsapp(whatsappUrl(waNumber, text));
   }
 
+  // Finalizar: se registra el pedido en esta misma pestaña y LUEGO se abre WhatsApp
+  // (sin pestaña en blanco intermedia, que en iPhone congelaba el registro).
   async function handleCheckout() {
+    if (checkingOut) return;
     if (cart.length === 0) return openGeneralWhatsapp();
-    setCheckoutError("");
+    setCheckoutError(null);
     setCheckingOut(true);
-    const targetWindow = window.open("", "_blank");
     try {
-      await openWhatsappCheckout(cart, {}, { targetWindow });
+      const { message } = await createOrderFromCart(cart, {});
+      // se vacía ya en el dispositivo: la página se va a WhatsApp antes de que React lo guarde
+      try { localStorage.setItem(CART_KEY, "[]"); } catch { /* sin almacenamiento */ }
       setCart([]);
       setView("home");
       setToast({ id: Date.now(), message: "Pedido registrado. Continúa la compra en WhatsApp." });
+      goToWhatsapp(whatsappUrl(waNumber, message));
     } catch (e) {
-      if (targetWindow && !targetWindow.closed) targetWindow.close();
-      setCheckoutError("No se pudo registrar el pedido. Intenta de nuevo.");
+      console.error("Checkout:", e);
+      // la venta no se pierde: puede enviar el pedido por WhatsApp aunque no quedara registrado
+      setCheckoutError({ detail: e?.message || String(e), url: whatsappUrl(waNumber, buildWhatsappMessage(null, cart)) });
     } finally {
       setCheckingOut(false);
     }
@@ -625,7 +619,15 @@ export default function StoreApp() {
                       </p>
                     </div>
 
-                    {checkoutError && <Alert className="mt-3">{checkoutError}</Alert>}
+                    {checkoutError && (
+                      <Alert className="mt-3">
+                        <p>No se pudo registrar el pedido (revisa tu conexión). Puedes intentarlo de nuevo o enviarlo directo por WhatsApp.</p>
+                        <button type="button" onClick={() => goToWhatsapp(checkoutError.url)} className="mt-2 font-semibold underline underline-offset-2">
+                          Enviar el pedido por WhatsApp
+                        </button>
+                        <p className="mt-1.5 text-[10px] opacity-60 break-words">Detalle: {checkoutError.detail}</p>
+                      </Alert>
+                    )}
 
                     <div className="fixed left-0 right-0 bottom-nav-offset z-20 bg-bg/90 backdrop-blur-xl border-t border-line/60">
                       <div className="mx-auto max-w-2xl px-4 py-3 flex items-center gap-4">

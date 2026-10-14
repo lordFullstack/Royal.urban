@@ -108,10 +108,21 @@ export async function fetchSettings() {
 // CHECKOUT — crea el pedido real ANTES de abrir WhatsApp,
 // sin descontar stock todavía (eso pasa al confirmar en admin).
 // ------------------------------------------------------------
+// Errores de red (señal móvil débil, pestaña congelada): se reintenta en lugar de fallar a la primera.
+const isNetworkError = (err) => /fetch|load failed|network|timeout|aborted/i.test(String(err?.message || err || ""));
+async function withRetry(fn, tries = 3) {
+  for (let i = 1; ; i++) {
+    // las consultas de Supabase son 'thenables', no promesas: se envuelven para poder capturar fallos
+    const res = await Promise.resolve().then(fn).catch((error) => ({ error }));
+    if (!res.error || i >= tries || !isNetworkError(res.error)) return res;
+    await new Promise((r) => setTimeout(r, 700 * i));
+  }
+}
+
 export async function createOrderFromCart(cart, customer = {}) {
   const total = cart.reduce((sum, item) => sum + item.qty * item.price, 0);
 
-  const { data: order, error: orderErr } = await supabase
+  const { data: order, error: orderErr } = await withRetry(() => supabase
     .from("orders")
     .insert({
       customer_name: customer.name ?? null,
@@ -120,7 +131,7 @@ export async function createOrderFromCart(cart, customer = {}) {
       status: "Nuevo",
     })
     .select()
-    .single();
+    .single());
   if (orderErr) throw orderErr;
 
   const items = cart.map((c) => ({
@@ -133,22 +144,43 @@ export async function createOrderFromCart(cart, customer = {}) {
     unit_price: c.price,
   }));
 
-  const { error: itemsErr } = await supabase.from("order_items").insert(items);
+  const { error: itemsErr } = await withRetry(() => supabase.from("order_items").insert(items));
   if (itemsErr) throw itemsErr;
 
   const message = buildWhatsappMessage(order, cart);
-  await supabase.from("orders").update({ whatsapp_message: message }).eq("id", order.id);
+  // guardar el texto es solo informativo: si falla, el pedido sigue siendo válido
+  await supabase.from("orders").update({ whatsapp_message: message }).eq("id", order.id).then(() => {}, () => {});
 
   return { order, message };
 }
 
+// order puede ser null: pedido que no se pudo registrar pero se envía igual por WhatsApp
 export function buildWhatsappMessage(order, cart) {
-  let msg = `Hola, quiero realizar el pedido *#${order.order_number}* en *ROYAL URBAN*.\n\nProductos:\n\n`;
+  const total = order?.total != null ? Number(order.total) : cart.reduce((s, c) => s + c.qty * c.price, 0);
+  let msg = order?.order_number
+    ? `Hola, quiero realizar el pedido *#${order.order_number}* en *ROYAL URBAN*.\n\nProductos:\n\n`
+    : `Hola, quiero realizar este pedido en *ROYAL URBAN*.\n\nProductos:\n\n`;
   cart.forEach((c) => {
-    msg += `• ${c.name}\n  Talla: ${c.size} | Color: ${c.color}\n  Cantidad: ${c.qty}${c.onRequest ? "\n  *Por encargo*" : ""}\n  Precio: $${c.price.toLocaleString("es-CO")}\n\n`;
+    msg += `• ${c.name}\n  Talla: ${c.size} | Color: ${c.color}\n  Cantidad: ${c.qty}${c.onRequest ? "\n  *Por encargo*" : ""}\n  Precio: $${Number(c.price).toLocaleString("es-CO")}\n\n`;
   });
-  msg += `Total: $${order.total.toLocaleString("es-CO")}\n\nQuedo atento.`;
+  msg += `Total: $${total.toLocaleString("es-CO")}\n\nQuedo atento.`;
   return msg;
+}
+
+/** Enlace de WhatsApp con el mensaje ya escrito. */
+export const whatsappUrl = (number, text) => `https://wa.me/${number || "573000000000"}?text=${encodeURIComponent(text)}`;
+
+/**
+ * Abre WhatsApp. En el celular se va en la MISMA pestaña: abrir pestañas nuevas en iPhone
+ * deja una pantalla en blanco y congela la tienda; en el computador se intenta una pestaña nueva.
+ */
+export function goToWhatsapp(url) {
+  const mobile = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent) || navigator.maxTouchPoints > 1;
+  if (!mobile) {
+    const w = window.open(url, "_blank");
+    if (w) return;
+  }
+  window.location.href = url;
 }
 
 export async function openWhatsappCheckout(cart, customer = {}, { targetWindow } = {}) {
