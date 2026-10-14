@@ -162,7 +162,9 @@ export async function openWhatsappCheckout(cart, customer = {}, { targetWindow }
   if (targetWindow && !targetWindow.closed) {
     targetWindow.location.href = url;
   } else {
-    window.open(url, "_blank");
+    // navegadores dentro de Instagram/Facebook bloquean ventanas nuevas: se abre en la misma pestaña
+    const w = window.open(url, "_blank");
+    if (!w) window.location.href = url;
   }
   return order;
 }

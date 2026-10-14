@@ -14,6 +14,16 @@ import { BrandMark, Button, IconButton, Badge, EmptyState, Alert, Toast, Section
 const SPLASH_MIN_MS = 900; // evita un parpadeo si Supabase responde muy rápido
 const SPLASH_FADE_MS = 240;
 const BRAND_CACHE_KEY = "ru:brand"; // solo para pintar la bienvenida en visitas siguientes
+const CART_KEY = "ru:cart"; // el carrito sobrevive a recargas y a volver desde WhatsApp
+
+function readCart() {
+  try {
+    const c = JSON.parse(localStorage.getItem(CART_KEY) || "[]");
+    return Array.isArray(c) ? c.filter((x) => x && x.key && x.qty > 0) : [];
+  } catch {
+    return [];
+  }
+}
 
 function readBrandCache() {
   try {
@@ -45,7 +55,7 @@ export default function StoreApp() {
   const [activeCategory, setActiveCategory] = useState("Nuevos");
   const [query, setQuery] = useState("");
   const [selectedProduct, setSelectedProduct] = useState(null);
-  const [cart, setCart] = useState([]);
+  const [cart, setCart] = useState(readCart);
   const [logoTaps, setLogoTaps] = useState(0);
   const [checkoutError, setCheckoutError] = useState("");
   const [checkingOut, setCheckingOut] = useState(false);
@@ -132,6 +142,67 @@ export default function StoreApp() {
 
   const collection = useMemo(() => products.filter((p) => p.inCollection), [products]);
 
+  // Guarda el carrito en el dispositivo
+  useEffect(() => {
+    try {
+      localStorage.setItem(CART_KEY, JSON.stringify(cart));
+    } catch {
+      /* almacenamiento no disponible: el carrito vive solo en esta visita */
+    }
+  }, [cart]);
+
+  // Con el catálogo cargado, el carrito guardado se pone al día: precio actual
+  // y fuera lo que ya no existe o se agotó.
+  const cartRef = useRef(cart);
+  cartRef.current = cart;
+  useEffect(() => {
+    if (!products.length) return;
+    let removed = 0;
+    const next = cartRef.current.flatMap((c) => {
+      const p = products.find((x) => x.id === c.id);
+      const v = p?.statusByVariant[`${c.color}-${c.size}`];
+      if (!p || !v || v.status === "agotado") {
+        removed++;
+        return [];
+      }
+      return [{ ...c, name: p.name, price: p.price, img: p.img, variantId: v.id, onRequest: v.status === "por_encargo" }];
+    });
+    setCart(next);
+    if (removed) setToast({ id: Date.now(), message: removed === 1 ? "Se quitó del carrito un producto que ya no está disponible." : `Se quitaron del carrito ${removed} productos que ya no están disponibles.` });
+  }, [products]);
+
+  // Botón "atrás" del celular: cada pantalla es una entrada del historial,
+  // así volver atrás regresa a la pantalla anterior en vez de salir de la tienda.
+  const productsRef = useRef(products);
+  productsRef.current = products;
+  useEffect(() => {
+    if (!window.history.state?.ru) window.history.replaceState({ ru: "home" }, "");
+    const onPop = (e) => {
+      const s = e.state;
+      if (!s?.ru) return;
+      if (s.ru === "product") {
+        const p = productsRef.current.find((x) => x.id === s.pid);
+        if (!p) return setView("home");
+        setSelectedProduct(p);
+      }
+      setView(s.ru);
+    };
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, []);
+  useEffect(() => {
+    const next = { ru: view, pid: view === "product" ? selectedProduct?.id ?? null : null };
+    const cur = window.history.state;
+    if (cur?.ru === next.ru && (cur?.pid ?? null) === next.pid) return; // ya estamos ahí (p. ej., tras pulsar atrás)
+    window.history.pushState(next, "");
+  }, [view, selectedProduct]);
+
+  /** Flecha de volver de las subpantallas: igual que el botón atrás del celular. */
+  function goBack() {
+    if (window.history.state?.ru && window.history.state.ru !== "home" && window.history.length > 1) window.history.back();
+    else setView("home");
+  }
+
   const cartCount = cart.reduce((a, c) => a + c.qty, 0);
   const cartTotal = cart.reduce((a, c) => a + c.qty * c.price, 0);
 
@@ -188,6 +259,21 @@ export default function StoreApp() {
     } catch {
       window.open("https://wa.me/573000000000", "_blank");
     }
+  }
+
+  /** Consulta por un producto concreto: abre WhatsApp sin crear pedido ni vaciar el carrito. */
+  async function askProductWhatsapp(product, color, size) {
+    const w = window.open("", "_blank"); // dentro del clic, para que no lo bloquee el navegador
+    let number = "573000000000";
+    try {
+      number = (await fetchSettings()).whatsapp?.number || number;
+    } catch {
+      /* sin conexión: número por defecto */
+    }
+    const text = `Hola, quiero información de *${product.name}*${size ? ` (talla ${size}` : ""}${color ? `${size ? ", " : " ("}color ${color}` : ""}${size || color ? ")" : ""}.`;
+    const url = `https://wa.me/${number}?text=${encodeURIComponent(text)}`;
+    if (w && !w.closed) w.location.href = url;
+    else window.location.href = url;
   }
 
   async function handleCheckout() {
@@ -361,7 +447,7 @@ export default function StoreApp() {
             )}
 
             {view === "collection" && (
-              <SubPage title="Colección" subtitle={`${collection.length} prendas seleccionadas`} onBack={() => setView("home")}>
+              <SubPage title="Colección" subtitle={`${collection.length} prendas seleccionadas`} onBack={goBack}>
                 {collection.length > 0 ? (
                   <ProductGrid items={collection} onOpen={openProduct} />
                 ) : (
@@ -376,7 +462,7 @@ export default function StoreApp() {
             )}
 
             {view === "categories" && (
-              <SubPage title="Categorías" subtitle={`${categories.length} categorías`} onBack={() => setView("home")}>
+              <SubPage title="Categorías" subtitle={`${categories.length} categorías`} onBack={goBack}>
                 {categories.length > 0 ? (
                   <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 sm:gap-4">
                     {categories.map((c) => {
@@ -414,7 +500,7 @@ export default function StoreApp() {
             {view === "search" && (
               <main className="mx-auto max-w-6xl px-4 pt-3 pb-[calc(var(--ru-nav-h)+2rem)]">
                 <div className="flex items-center gap-2">
-                  <IconButton label="Volver" onClick={() => setView("home")} className="-ml-2">
+                  <IconButton label="Volver" onClick={goBack} className="-ml-2">
                     <ChevronLeft size={22} />
                   </IconButton>
                   <div className="flex-1 flex items-center gap-2 h-11 px-4 rounded-full bg-surface border border-line focus-within:border-ink/40 transition-colors">
@@ -464,10 +550,11 @@ export default function StoreApp() {
 
             {view === "product" && selectedProduct && (
               <ProductDetail
+                key={selectedProduct.id}
                 product={selectedProduct}
-                onBack={() => setView("home")}
+                onBack={goBack}
                 onAdd={addToCart}
-                onWhatsapp={handleCheckout}
+                onWhatsapp={askProductWhatsapp}
                 whatsappBusy={checkingOut}
                 cartCount={cartCount}
                 onCart={() => setView("cart")}
@@ -478,7 +565,7 @@ export default function StoreApp() {
               <SubPage
                 title="Tu carrito"
                 subtitle={cartCount > 0 ? `${cartCount} ${cartCount === 1 ? "producto" : "productos"}` : null}
-                onBack={() => setView("home")}
+                onBack={goBack}
                 extraBottom={cart.length > 0}
                 narrow
               >
@@ -846,9 +933,21 @@ function colorHex(name = "") {
 }
 
 function ProductDetail({ product, onBack, onAdd, onWhatsapp, whatsappBusy, cartCount, onCart }) {
-  const [color, setColor] = useState(product.colors[0]);
-  const [size, setSize] = useState(product.sizes[0]);
+  // tallas que se pueden pedir en un color
+  const sizesFor = (c) => product.sizes.filter((s) => {
+    const v = product.statusByVariant[`${c}-${s}`];
+    return v && v.status !== "agotado";
+  });
+  // arranca en la primera combinación disponible (no en una talla agotada)
+  const [color, setColor] = useState(() => product.colors.find((c) => sizesFor(c).length) ?? product.colors[0]);
+  const [size, setSize] = useState(() => sizesFor(color)[0] ?? product.sizes[0]);
   const [qty, setQty] = useState(1);
+
+  function pickColor(c) {
+    setColor(c);
+    const av = sizesFor(c);
+    if (av.length && !av.includes(size)) setSize(av[0]);
+  }
 
   const variant = product.statusByVariant[`${color}-${size}`];
   const status = statusVisual(variant?.status || "agotado");
@@ -909,7 +1008,7 @@ function ProductDetail({ product, onBack, onAdd, onWhatsapp, whatsappBusy, cartC
                 return (
                   <button
                     key={c}
-                    onClick={() => setColor(c)}
+                    onClick={() => pickColor(c)}
                     aria-pressed={selected}
                     className={cx("chip pl-2.5 pr-3.5", selected && "chip-soft-active")}
                   >
@@ -972,7 +1071,7 @@ function ProductDetail({ product, onBack, onAdd, onWhatsapp, whatsappBusy, cartC
           <Button size="lg" disabled={!isAvailable} onClick={handleAdd} icon={<ShoppingBag size={18} />} className="flex-1 md:flex-none md:min-w-[280px]">
             {!isAvailable ? "Agotado" : variant.status === "por_encargo" ? (qty > 1 ? `Encargar ${qty} · ${money(product.price * qty)}` : "Encargar") : qty > 1 ? `Agregar ${qty} · ${money(product.price * qty)}` : "Agregar al carrito"}
           </Button>
-          <Button variant="whatsapp" size="lg" onClick={onWhatsapp} loading={whatsappBusy} aria-label="Consultar por WhatsApp" className="px-0 w-[52px] shrink-0" icon={<MessageCircle size={20} />} />
+          <Button variant="whatsapp" size="lg" onClick={() => onWhatsapp(product, color, size)} loading={whatsappBusy} aria-label="Consultar por WhatsApp" className="px-0 w-[52px] shrink-0" icon={<MessageCircle size={20} />} />
         </div>
       </div>
     </main>
