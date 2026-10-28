@@ -3,7 +3,7 @@ import {
   Search, ShoppingBag, X, Plus, Minus, Home, LayoutGrid, MessageCircle, ChevronLeft, ChevronRight,
   Flame, Trash2, Shirt, RefreshCw, WifiOff, ArrowRight, SearchX,
 } from "lucide-react";
-import { fetchCatalog, fetchCategories, fetchActivePromotions, fetchSettings, createOrderFromCart, buildWhatsappMessage, whatsappUrl, goToWhatsapp, statusVisual } from "./lib/supabase";
+import { fetchCatalog, fetchCategories, fetchActivePromotions, fetchSettings, createOrderFromCart, buildWhatsappMessage, whatsappUrl, goToWhatsapp, productUrl, storeBaseUrl, statusVisual } from "./lib/supabase";
 import { BrandMark, Button, IconButton, Badge, EmptyState, Alert, Toast, SectionHeader, cx, money } from "./ui";
 
 /* ---------------------------------------------------------
@@ -165,7 +165,7 @@ export default function StoreApp() {
         removed++;
         return [];
       }
-      return [{ ...c, name: p.name, price: p.price, img: p.img, variantId: v.id, onRequest: v.status === "por_encargo" }];
+      return [{ ...c, name: p.name, slug: p.slug, price: p.price, img: p.img, variantId: v.id, onRequest: v.status === "por_encargo" }];
     });
     setCart(next);
     if (removed) setToast({ id: Date.now(), message: removed === 1 ? "Se quitó del carrito un producto que ya no está disponible." : `Se quitaron del carrito ${removed} productos que ya no están disponibles.` });
@@ -175,8 +175,15 @@ export default function StoreApp() {
   // así volver atrás regresa a la pantalla anterior en vez de salir de la tienda.
   const productsRef = useRef(products);
   productsRef.current = products;
+  // enlace directo a una prenda (?p=identificador&c=color&t=talla), leído una sola vez al entrar
+  const deepLink = useRef(null);
+  if (deepLink.current === null) {
+    const q = new URLSearchParams(window.location.search);
+    deepLink.current = q.get("p") ? { ref: q.get("p"), color: q.get("c"), size: q.get("t") } : false;
+  }
+  const [initialVariant, setInitialVariant] = useState(null);
   useEffect(() => {
-    if (!window.history.state?.ru) window.history.replaceState({ ru: "home" }, "");
+    if (!window.history.state?.ru) window.history.replaceState({ ru: "home" }, "", storeBaseUrl());
     const onPop = (e) => {
       const s = e.state;
       if (!s?.ru) return;
@@ -194,8 +201,20 @@ export default function StoreApp() {
     const next = { ru: view, pid: view === "product" ? selectedProduct?.id ?? null : null };
     const cur = window.history.state;
     if (cur?.ru === next.ru && (cur?.pid ?? null) === next.pid) return; // ya estamos ahí (p. ej., tras pulsar atrás)
-    window.history.pushState(next, "");
+    const url = view === "product" && selectedProduct ? productUrl(selectedProduct.slug || selectedProduct.id) : storeBaseUrl();
+    window.history.pushState(next, "", url);
   }, [view, selectedProduct]);
+
+  // al cargar el catálogo, abrir la prenda del enlace (con su color y talla si vienen)
+  useEffect(() => {
+    const link = deepLink.current;
+    if (!link || !products.length) return;
+    deepLink.current = false;
+    const p = products.find((x) => x.slug === link.ref || x.id === link.ref);
+    if (!p) return setToast({ id: Date.now(), message: "Esa prenda ya no está disponible. Mira el resto de la colección." });
+    setInitialVariant({ id: p.id, color: link.color, size: link.size });
+    openProduct(p);
+  }, [products]);
 
   /** Flecha de volver de las subpantallas: igual que el botón atrás del celular. */
   function goBack() {
@@ -219,7 +238,7 @@ export default function StoreApp() {
       if (existing) {
         return prev.map((c) => (c.key === key ? { ...c, qty: c.qty + qty } : c));
       }
-      return [...prev, { key, variantId: variant?.id, id: product.id, name: product.name, color, size, qty, price: product.price, img: product.img, onRequest: variant?.status === "por_encargo" }];
+      return [...prev, { key, variantId: variant?.id, id: product.id, slug: product.slug, name: product.name, color, size, qty, price: product.price, img: product.img, onRequest: variant?.status === "por_encargo" }];
     });
     // Feedback sin sacar al usuario del producto
     setToast({
@@ -260,7 +279,7 @@ export default function StoreApp() {
 
   /** Consulta por un producto concreto: abre WhatsApp sin crear pedido ni vaciar el carrito. */
   function askProductWhatsapp(product, color, size) {
-    const text = `Hola, quiero información de *${product.name}*${size ? ` (talla ${size}` : ""}${color ? `${size ? ", " : " ("}color ${color}` : ""}${size || color ? ")" : ""}.`;
+    const text = `Hola, quiero información de *${product.name}*${size ? ` (talla ${size}` : ""}${color ? `${size ? ", " : " ("}color ${color}` : ""}${size || color ? ")" : ""}.\n${productUrl(product.slug || product.id, color, size)}`;
     goToWhatsapp(whatsappUrl(waNumber, text));
   }
 
@@ -546,6 +565,7 @@ export default function StoreApp() {
               <ProductDetail
                 key={selectedProduct.id}
                 product={selectedProduct}
+                initial={initialVariant?.id === selectedProduct.id ? initialVariant : null}
                 onBack={goBack}
                 onAdd={addToCart}
                 onWhatsapp={askProductWhatsapp}
@@ -934,15 +954,17 @@ function colorHex(name = "") {
   return COLOR_HEX[key] || null;
 }
 
-function ProductDetail({ product, onBack, onAdd, onWhatsapp, whatsappBusy, cartCount, onCart }) {
+function ProductDetail({ product, initial, onBack, onAdd, onWhatsapp, whatsappBusy, cartCount, onCart }) {
   // tallas que se pueden pedir en un color
   const sizesFor = (c) => product.sizes.filter((s) => {
     const v = product.statusByVariant[`${c}-${s}`];
     return v && v.status !== "agotado";
   });
   // arranca en la primera combinación disponible (no en una talla agotada)
-  const [color, setColor] = useState(() => product.colors.find((c) => sizesFor(c).length) ?? product.colors[0]);
-  const [size, setSize] = useState(() => sizesFor(color)[0] ?? product.sizes[0]);
+  const [color, setColor] = useState(() =>
+    initial?.color && product.colors.includes(initial.color) ? initial.color : product.colors.find((c) => sizesFor(c).length) ?? product.colors[0]);
+  const [size, setSize] = useState(() =>
+    initial?.size && sizesFor(color).includes(initial.size) ? initial.size : sizesFor(color)[0] ?? product.sizes[0]);
   const [qty, setQty] = useState(1);
 
   function pickColor(c) {

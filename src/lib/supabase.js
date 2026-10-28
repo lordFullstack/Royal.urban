@@ -189,6 +189,20 @@ export async function createOrderFromCart(cart, customer = {}) {
   return { order, message };
 }
 
+/** Dirección de la tienda (respeta la subruta de GitHub Pages, p. ej. /Royal.urban/). */
+export const storeBaseUrl = () => `${window.location.origin}${import.meta.env.BASE_URL || "/"}`;
+
+/**
+ * Enlace directo a una prenda: ?p=<identificador>&c=<color>&t=<talla>.
+ * El identificador es el slug del producto (único, p. ej. "undergold-369"); también vale su id.
+ */
+export function productUrl(ref, color, size) {
+  const q = new URLSearchParams({ p: ref });
+  if (color) q.set("c", color);
+  if (size) q.set("t", size);
+  return `${storeBaseUrl()}?${q.toString()}`;
+}
+
 // order puede ser null: pedido que no se pudo registrar pero se envía igual por WhatsApp
 export function buildWhatsappMessage(order, cart) {
   const total = order?.total != null ? Number(order.total) : cart.reduce((s, c) => s + c.qty * c.price, 0);
@@ -196,7 +210,8 @@ export function buildWhatsappMessage(order, cart) {
     ? `Hola, quiero realizar el pedido *#${order.order_number}* en *ROYAL URBAN*.\n\nProductos:\n\n`
     : `Hola, quiero realizar este pedido en *ROYAL URBAN*.\n\nProductos:\n\n`;
   cart.forEach((c) => {
-    msg += `• ${c.name}\n  Talla: ${c.size} | Color: ${c.color}\n  Cantidad: ${c.qty}${c.onRequest ? "\n  *Por encargo*" : ""}\n  Precio: $${Number(c.price).toLocaleString("es-CO")}\n\n`;
+    const ref = c.slug || c.id;
+    msg += `• ${c.name}\n  Ref: ${String(ref).toUpperCase()}\n  Talla: ${c.size} | Color: ${c.color}\n  Cantidad: ${c.qty}${c.onRequest ? "\n  *Por encargo*" : ""}\n  Precio: $${Number(c.price).toLocaleString("es-CO")}\n  Ver prenda: ${productUrl(ref, c.color, c.size)}\n\n`;
   });
   msg += `Total: $${total.toLocaleString("es-CO")}\n\nQuedo atento.`;
   return msg;
